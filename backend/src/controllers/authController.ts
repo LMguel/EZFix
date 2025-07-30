@@ -7,27 +7,38 @@ const prisma = new PrismaClient();
 const SECRET = process.env.JWT_SECRET || "secreto";
 
 export const register = async (req: Request, res: Response) => {
-  const { nome, email, senha } = req.body;
+  try {
+    const { nome, email, senha } = req.body;
 
-  const existente = await prisma.user.findUnique({ where: { email } });
-  if (existente) return res.status(400).json({ erro: "Usu·rio j· existe." });
+    const existente = await prisma.user.findUnique({ where: { email } });
+    if (existente) {
+      return res.status(400).json({ erro: "Usu√°rio j√° existe." });
+    }
 
-  const senhaHash = await bcrypt.hash(senha, 10);
+    const senhaHash = await bcrypt.hash(senha, 10);
 
-  const user = await prisma.user.create({
-    data: { nome, email, senhaHash }
-  });
+    const user = await prisma.user.create({
+      data: { nome, email, senhaHash },
+    });
 
-  res.json({ id: user.id, nome: user.nome, email: user.email });
+    return res.json({ id: user.id, nome: user.nome, email: user.email });
+  } catch (error) {
+    return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
+  }
 };
 
 export const login = async (req: Request, res: Response) => {
-  const { email, senha } = req.body;
+  try {
+    const { email, senha } = req.body;
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await bcrypt.compare(senha, user.senhaHash)))
-    return res.status(401).json({ erro: "Credenciais inv·lidas." });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(senha, user.senhaHash))) {
+      return res.status(401).json({ erro: "Credenciais inv√°lidas." });
+    }
 
-  const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "1d" });
-  res.json({ token });
+    const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "1d" });
+    return res.json({ token });
+  } catch (error) {
+    return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
+  }
 };
