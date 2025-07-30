@@ -9,6 +9,10 @@ import { autenticar } from "../middleware/auth";
 
 const router = Router();
 
+router.get("/", (req, res) => {
+  res.json({ message: "API is running" });
+});
+
 router.post("/auth/register", register);
 router.post("/auth/login", login);
 
