@@ -1,18 +1,27 @@
-import { Router } from 'express';
+import { Router } from "express";
 import {
     criarAvaliacao,
     listarAvaliacoes,
-    buscarAvaliacao,
     atualizarAvaliacao,
     deletarAvaliacao,
-} from '../controllers/avaliacaoController';
+} from "../controllers/avaliacaoController";
 
 const router = Router();
 
-router.post('/', criarAvaliacao);
-router.get('/', listarAvaliacoes);
-router.get('/:id', buscarAvaliacao);
-router.put('/:id', atualizarAvaliacao);
-router.delete('/:id', deletarAvaliacao);
+/**
+ * Rotas de Avaliações
+ */
+
+// Criar uma avaliação
+router.post("/", criarAvaliacao);
+
+// Listar todas avaliações de uma redação
+router.get("/:redacaoId", listarAvaliacoes);
+
+// Atualizar uma avaliação pelo ID
+router.put("/:id", atualizarAvaliacao);
+
+// Deletar uma avaliação pelo ID
+router.delete("/:id", deletarAvaliacao);
 
 export default router;
