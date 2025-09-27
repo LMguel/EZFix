@@ -1,23 +1,13 @@
 import { Router } from "express";
-import { register, login } from "../controllers/authController";
-import {
-    listarRedacoes,
-    criarRedacao,
-    avaliarRedacao
-} from "../controllers/redacaoController";
-import { autenticar } from "../middleware/auth";
+import redacaoRoutes from "./redacaoRoutes";
+import avaliacaoRoutes from "./avaliacaoRoutes";
 
 const router = Router();
 
-router.get("/", (req, res) => {
-  res.json({ message: "API is running" });
-});
+// Rotas de Redações
+router.use("/redacoes", redacaoRoutes);
 
-router.post("/auth/register", register);
-router.post("/auth/login", login);
-
-router.get("/redacoes", autenticar, listarRedacoes);
-router.post("/redacoes", autenticar, criarRedacao);
-router.post("/redacoes/:redacaoId/avaliar", autenticar, avaliarRedacao);
+// Rotas de Avaliações (aninhadas em Redações)
+router.use("/redacoes", avaliacaoRoutes);
 
 export default router;

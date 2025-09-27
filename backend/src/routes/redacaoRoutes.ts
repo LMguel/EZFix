@@ -1,26 +1,20 @@
 import { Router } from "express";
-import { autenticar } from "../middleware/auth";
 import {
     listarRedacoes,
     obterRedacao,
     criarRedacao,
     atualizarRedacao,
-    deletarRedacao,
-    avaliarRedacao,
+    excluirRedacao,
 } from "../controllers/redacaoController";
+import { autenticar } from "../middleware/auth";
 
 const router = Router();
 
-router.use(autenticar);
-
 // CRUD de redações
-router.get("/", listarRedacoes);
-router.get("/:id", obterRedacao);
-router.post("/", criarRedacao);
-router.put("/:id", atualizarRedacao);
-router.delete("/:id", deletarRedacao);
-
-// Avaliação de redação
-router.post("/:redacaoId/avaliar", avaliarRedacao);
+router.get("/", autenticar, listarRedacoes);
+router.get("/:id", autenticar, obterRedacao);
+router.post("/", autenticar, criarRedacao);
+router.put("/:id", autenticar, atualizarRedacao);
+router.delete("/:id", autenticar, excluirRedacao);
 
 export default router;

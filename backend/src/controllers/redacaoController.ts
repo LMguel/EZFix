@@ -1,9 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { Request, Response } from "express";
+import { extrairTextoDaImagem, gerarNotaAutomatica } from "../services/ocrService";
+
 
 const prisma = new PrismaClient();
 
-// LISTAR todas as redações do usuário logado
+// Listar todas as redações de um usuário
 export const listarRedacoes = async (req: Request, res: Response) => {
     try {
         const usuarioId = req.userId;
@@ -13,11 +15,11 @@ export const listarRedacoes = async (req: Request, res: Response) => {
         });
         return res.json(redacoes);
     } catch (error) {
-        return res.status(500).json({ erro: "Erro ao listar redações." });
+        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
 
-// OBTER redação por ID
+// Obter uma redação específica
 export const obterRedacao = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -34,40 +36,49 @@ export const obterRedacao = async (req: Request, res: Response) => {
 
         return res.json(redacao);
     } catch (error) {
-        return res.status(500).json({ erro: "Erro ao buscar redação." });
+        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
 
-// CRIAR nova redação
+// Criar nova redação com OCR + nota automática
 export const criarRedacao = async (req: Request, res: Response) => {
     try {
-        const { titulo, imagemUrl, textoExtraido } = req.body;
+        const { titulo, imagemUrl } = req.body;
         const usuarioId = req.userId;
 
         if (!usuarioId) {
             return res.status(401).json({ erro: "Usuário não autenticado." });
         }
 
+        // 1) Extrair texto da imagem
+        const textoExtraido = await extrairTextoDaImagem(imagemUrl);
+
+        // 2) Gerar nota automática
+        const notaGerada = gerarNotaAutomatica(textoExtraido);
+
+        // 3) Salvar no banco
         const redacao = await prisma.redacao.create({
             data: {
                 titulo,
                 imagemUrl,
                 textoExtraido,
+                notaGerada,
                 usuarioId,
             },
         });
 
         return res.status(201).json(redacao);
     } catch (error) {
-        return res.status(500).json({ erro: "Erro ao criar redação." });
+        console.error("Erro ao criar redação:", error);
+        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
 
-// ATUALIZAR redação
+// Atualizar redação
 export const atualizarRedacao = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { titulo, imagemUrl, textoExtraido, notaGerada, notaFinal } = req.body;
+        const { titulo, imagemUrl, textoExtraido, notaFinal } = req.body;
         const usuarioId = req.userId;
 
         const redacao = await prisma.redacao.findFirst({
@@ -78,25 +89,35 @@ export const atualizarRedacao = async (req: Request, res: Response) => {
             return res.status(404).json({ erro: "Redação não encontrada." });
         }
 
+        let novoTextoExtraido = textoExtraido ?? redacao.textoExtraido;
+        let novaNotaGerada = redacao.notaGerada;
+
+        // ⚡ Se imagem foi alterada → rodar OCR novamente
+        if (imagemUrl && imagemUrl !== redacao.imagemUrl) {
+            novoTextoExtraido = await extrairTextoDaImagem(imagemUrl);
+            novaNotaGerada = gerarNotaAutomatica(novoTextoExtraido || "");
+        }
+
         const redacaoAtualizada = await prisma.redacao.update({
             where: { id },
             data: {
                 titulo,
                 imagemUrl,
-                textoExtraido,
-                notaGerada,
-                notaFinal,
+                textoExtraido: novoTextoExtraido,
+                notaGerada: novaNotaGerada,
+                notaFinal, // definido pelo professor/corretor
             },
         });
 
         return res.json(redacaoAtualizada);
     } catch (error) {
-        return res.status(500).json({ erro: "Erro ao atualizar redação." });
+        console.error("Erro ao atualizar redação:", error);
+        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
 
-// DELETAR redação
-export const deletarRedacao = async (req: Request, res: Response) => {
+// Excluir redação
+export const excluirRedacao = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const usuarioId = req.userId;
@@ -111,38 +132,10 @@ export const deletarRedacao = async (req: Request, res: Response) => {
 
         await prisma.redacao.delete({ where: { id } });
 
-        return res.json({ mensagem: "Redação deletada com sucesso." });
+        return res.json({ mensagem: "Redação excluída com sucesso." });
     } catch (error) {
-        return res.status(500).json({ erro: "Erro ao deletar redação." });
+        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
 
-// AVALIAR redação (múltiplas competências)
-export const avaliarRedacao = async (req: Request, res: Response) => {
-    try {
-        const { redacaoId } = req.params;
-        const { competencias } = req.body; // array de { competencia, notaComp, comentario }
 
-        const redacao = await prisma.redacao.findUnique({ where: { id: redacaoId } });
-        if (!redacao) {
-            return res.status(404).json({ erro: "Redação não encontrada." });
-        }
-
-        const avaliacoes = await Promise.all(
-            competencias.map((comp: any) =>
-                prisma.avaliacao.create({
-                    data: {
-                        competencia: comp.competencia,
-                        notaComp: comp.notaComp,
-                        comentario: comp.comentario,
-                        redacaoId,
-                    },
-                })
-            )
-        );
-
-        return res.json(avaliacoes);
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao avaliar redação." });
-    }
-};

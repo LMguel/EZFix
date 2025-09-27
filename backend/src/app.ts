@@ -14,5 +14,7 @@ app.use(express.json());
 app.use(routes);
 app.use('/avaliacoes', avaliacaoRoutes);
 app.use("/redacoes", redacaoRoutes);
+app.use("/api", routes);
+
 
 export default app;
