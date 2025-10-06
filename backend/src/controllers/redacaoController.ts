@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Request, Response } from "express";
 import { extrairTextoDaImagem, gerarNotaAutomatica } from "../services/ocrService";
+import { analisarTexto } from "../services/analiseService";
 
 
 const prisma = new PrismaClient();
@@ -50,27 +51,60 @@ export const criarRedacao = async (req: Request, res: Response) => {
             return res.status(401).json({ erro: "Usuário não autenticado." });
         }
 
+        if (!titulo || !imagemUrl) {
+            return res.status(400).json({ erro: "Título e imagem são obrigatórios." });
+        }
+
+        console.log("Criando redação:", { titulo, imageType: imagemUrl.startsWith('data:') ? 'base64' : 'url' });
+
         // 1) Extrair texto da imagem
-        const textoExtraido = await extrairTextoDaImagem(imagemUrl);
+        let textoExtraido: string;
+        try {
+            textoExtraido = await extrairTextoDaImagem(imagemUrl);
+        } catch (ocrError) {
+            console.error("Erro específico no OCR:", ocrError);
+            // Continuar mesmo com erro de OCR, salvando sem texto
+            textoExtraido = "Erro ao processar OCR - texto não pôde ser extraído.";
+        }
 
         // 2) Gerar nota automática
         const notaGerada = gerarNotaAutomatica(textoExtraido);
 
-        // 3) Salvar no banco
+        // 3) Analisar texto e gerar feedback
+        const analise = analisarTexto(textoExtraido);
+
+        // 4) Salvar no banco
         const redacao = await prisma.redacao.create({
             data: {
                 titulo,
-                imagemUrl,
+                imagemUrl: imagemUrl.length > 1000 ? imagemUrl.substring(0, 1000) + "..." : imagemUrl, // Truncar se muito longo
                 textoExtraido,
                 notaGerada,
                 usuarioId,
             },
         });
 
-        return res.status(201).json(redacao);
+        console.log("Redação criada com sucesso:", redacao.id);
+        
+        // Retornar redação com análise
+        return res.status(201).json({
+            ...redacao,
+            analise
+        });
     } catch (error) {
         console.error("Erro ao criar redação:", error);
-        return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
+        
+        // Tratar diferentes tipos de erro
+        if (error instanceof Error) {
+            if (error.message.includes('PayloadTooLargeError')) {
+                return res.status(413).json({ erro: "Imagem muito grande. Tente uma imagem menor." });
+            }
+            if (error.message.includes('UNIQUE constraint failed')) {
+                return res.status(409).json({ erro: "Redação duplicada." });
+            }
+        }
+        
+        return res.status(500).json({ erro: "Erro interno do servidor. Tente novamente." });
     }
 };
 
@@ -113,6 +147,34 @@ export const atualizarRedacao = async (req: Request, res: Response) => {
     } catch (error) {
         console.error("Erro ao atualizar redação:", error);
         return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
+    }
+};
+
+// Obter análise de uma redação específica
+export const obterAnaliseRedacao = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const usuarioId = req.userId;
+
+        const redacao = await prisma.redacao.findFirst({
+            where: { id, usuarioId },
+            include: { avaliacoes: true },
+        });
+
+        if (!redacao) {
+            return res.status(404).json({ erro: "Redação não encontrada." });
+        }
+
+        // Gerar análise do texto
+        const analise = analisarTexto(redacao.textoExtraido || "");
+
+        return res.json({
+            redacao,
+            analise
+        });
+    } catch (error) {
+        console.error("Erro ao obter análise:", error);
+        return res.status(500).json({ erro: "Erro interno do servidor." });
     }
 };
 
