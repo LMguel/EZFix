@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { redacaoService, authService } from '../services/api';
 import { Redacao } from '../types';
 import AnaliseRedacao from '../components/AnaliseRedacao';
 import VisualizarTexto from '../components/VisualizarTexto';
+import ProcessingModal from '../components/ProcessingModal';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -10,6 +11,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [redacoes, setRedacoes] = useState<Redacao[]>([]);
+  const [enemScores, setEnemScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [newRedacao, setNewRedacao] = useState({
@@ -17,7 +19,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     imagemUrl: '',
   });
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [processingOpen, setProcessingOpen] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
+  const [processingDetails, setProcessingDetails] = useState<string | undefined>(undefined);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const imgPreviewRef = useRef<HTMLImageElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [analiseModalOpen, setAnaliseModalOpen] = useState(false);
@@ -41,6 +47,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       const data = await redacaoService.list();
       setRedacoes(data);
       setLastUpdate(new Date());
+      // buscar rapidamente nota ENEM para as 3 mais recentes (apenas para exibição)
+      try {
+        const recent = data.slice(0, 3);
+        const scores: Record<string, number> = {};
+        await Promise.all(recent.map(async (r: Redacao) => {
+          try {
+            const resp = await redacaoService.getAnaliseEnem(r.id.toString());
+            const nota = resp?.analise?.notaGeral ?? resp?.analise?.notaGeral ?? null;
+            if (nota !== null && nota !== undefined) scores[r.id] = Number(nota);
+          } catch (e) {
+            // ignore per-item errors
+          }
+        }));
+        setEnemScores(scores);
+      } catch (e) {
+        // ignore
+      }
     } catch (error) {
       console.error('Erro ao carregar redações:', error);
     } finally {
@@ -56,6 +79,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const fecharAnalise = () => {
     setAnaliseModalOpen(false);
     setRedacaoAnaliseId(null);
+    setProcessingOpen(false);
   };
 
   const abrirTexto = (redacao: Redacao) => {
@@ -73,23 +97,42 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     setUploadLoading(true);
 
     try {
+      // abrir modal de processamento com etapa inicial
+      setProcessingOpen(true);
+      setProcessingStep('Pré-processando imagem');
+      setProcessingDetails('Ajustando contraste e preparando para OCR...');
       let imagemUrl = newRedacao.imagemUrl;
       
-      // Se há um arquivo selecionado, converter para base64
-      if (selectedFile) {
-        imagemUrl = await convertFileToBase64(selectedFile);
+      // Se o usuário forneceu uma URL, use-a; caso contrário converta o arquivo inteiro para base64
+      if (newRedacao.imagemUrl) {
+        imagemUrl = newRedacao.imagemUrl;
+      } else if (selectedFile) {
+        imagemUrl = await convertFileToBase64(selectedFile, null);
       }
 
-      await redacaoService.create({
+      // indicar que o OCR está em progresso
+      setProcessingStep('Extraindo texto (OCR)');
+      setProcessingDetails('Executando OCR otimizado (pode levar alguns segundos)');
+
+      const created = await redacaoService.create({
         titulo: newRedacao.titulo,
         imagemUrl: imagemUrl,
       });
-      
+
       setNewRedacao({ titulo: '', imagemUrl: '' });
       setSelectedFile(null);
       setShowUploadModal(false);
       loadRedacoes();
-      alert('Redação enviada com sucesso! O OCR está processando...');
+
+  // Indicar que a análise GPT será iniciada
+  setProcessingStep('Analisando com GPT');
+  setProcessingDetails('Enviando texto extraído para o modelo para avaliação ENEM...');
+
+  // Abrir modal de análise automaticamente (o componente fará a chamada ENEM)
+  setRedacaoAnaliseId(created.id);
+  setAnaliseModalOpen(true);
+  // fechar modal de processamento após abrir analise
+  setTimeout(() => setProcessingOpen(false), 800);
     } catch (error: any) {
       console.error('Erro ao enviar redação:', error);
       
@@ -105,12 +148,49 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
   };
 
-  const convertFileToBase64 = (file: File): Promise<string> => {
+  // crop removed: attachments are sent as full image or URL
+
+  const convertFileToBase64 = (file: File, selectionParam: { x: number; y: number; w: number; h: number } | null): Promise<string> => {
     return new Promise((resolve, reject) => {
+      const img = new Image();
       const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
+      reader.onload = () => {
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Canvas context unavailable');
+
+            const sw = img.naturalWidth, sh = img.naturalHeight;
+            // If there is a selection (coords relative to displayed image), map to natural size
+            if (selectionParam && imgPreviewRef.current) {
+              const disp = imgPreviewRef.current.getBoundingClientRect();
+              const scaleX = sw / disp.width;
+              const scaleY = sh / disp.height;
+              const sx = Math.max(0, Math.floor(selectionParam.x * scaleX));
+              const sy = Math.max(0, Math.floor(selectionParam.y * scaleY));
+              const swidth = Math.max(1, Math.floor(selectionParam.w * scaleX));
+              const sheight = Math.max(1, Math.floor(selectionParam.h * scaleY));
+              canvas.width = swidth;
+              canvas.height = sheight;
+              ctx.drawImage(img, sx, sy, swidth, sheight, 0, 0, swidth, sheight);
+            } else {
+              canvas.width = sw;
+              canvas.height = sh;
+              ctx.drawImage(img, 0, 0, sw, sh);
+            }
+
+            const dataUrl = canvas.toDataURL('image/png');
+            resolve(dataUrl);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        img.onerror = (e) => reject(new Error('Falha ao carregar imagem para crop'));
+        img.src = reader.result as string;
+      };
       reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
     });
   };
 
@@ -127,8 +207,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       return;
     }
     
-    setSelectedFile(file);
-    setNewRedacao({ ...newRedacao, imagemUrl: '' });
+  setSelectedFile(file);
+  setNewRedacao({ ...newRedacao, imagemUrl: '' });
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -296,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="bg-green-50 border border-green-200 p-4 rounded-lg mb-6">
             <p className="text-green-800 text-sm">
-              ✨ Nova funcionalidade: Reconhecimento manuscrito melhorado com 98% de precisão!
+              ✨ Texto analisado com sucesso!!
             </p>
           </div>
 
@@ -445,26 +525,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                     <div className="text-2xl font-bold text-green-600 mb-2">
                       {redacao.notaFinal.toFixed(1)}
                     </div>
-                  ) : redacao.notaGerada !== null && redacao.notaGerada !== undefined ? (
+                  ) : (
                     <div className="mb-2">
                       <div className="text-lg font-semibold text-blue-600">
-                        Nota OCR: {redacao.notaGerada.toFixed(1)}
+                        Nota ENEM: { (enemScores[redacao.id] !== undefined) ? enemScores[redacao.id].toFixed(1) : (redacao.notaGerada !== undefined && redacao.notaGerada !== null ? redacao.notaGerada.toFixed(1) : '—') }
                       </div>
                       <div className="text-xs text-gray-500">
-                        {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' 
-                          ? `${redacao.textoExtraido.split(' ').length} palavras extraídas`
-                          : 'Nenhum texto detectado'
-                        }
+                        Qualidade da imagem: {redacao.notaGerada !== null && redacao.notaGerada !== undefined ? `${redacao.notaGerada.toFixed(1)} (Nota OCR)` : 'N/A'}
                       </div>
                     </div>
-                  ) : (
+                  )}
                     <div className="mb-2">
                       <div className="flex items-center gap-2 text-yellow-600">
                         <div className="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
                         <span className="text-sm">Processando OCR...</span>
                       </div>
                     </div>
-                  )}
                   
                   {/* Preview do texto extraído */}
                   {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
@@ -536,26 +612,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             
             <form onSubmit={handleCreateRedacao} className="space-y-4">
               {selectedFile && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Preview da Imagem:</h4>
-                  <div className="flex items-center space-x-4">
-                    <img
-                      src={URL.createObjectURL(selectedFile)}
-                      alt="Preview"
-                      className="w-20 h-20 object-cover rounded border"
-                    />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-700">{selectedFile.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Tipo: {selectedFile.type}
-                      </p>
+                  <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Preview da Imagem</h4>
+                    <p className="text-xs text-gray-500 mb-2">A imagem será enviada inteira para o OCR. Se preferir, cole uma URL da imagem abaixo.</p>
+                    <div className="relative bg-white border rounded-md overflow-hidden" style={{ maxWidth: 520 }}>
+                      <img
+                        ref={el => { if (el) imgPreviewRef.current = el; }}
+                        src={URL.createObjectURL(selectedFile)}
+                        alt="Preview"
+                        className="w-full h-auto max-h-[360px] object-contain"
+                      />
                     </div>
                   </div>
-                </div>
-              )}
+                )}
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -615,12 +684,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         </div>
       )}
 
+  {/* Modal de Processamento */}
+  <ProcessingModal isOpen={processingOpen} step={processingStep} details={processingDetails} />
+
       {/* Modal de Análise */}
       {redacaoAnaliseId && (
         <AnaliseRedacao
           redacaoId={redacaoAnaliseId}
           isVisible={analiseModalOpen}
           onClose={fecharAnalise}
+          onProgress={(step, details) => { setProcessingOpen(true); setProcessingStep(step); setProcessingDetails(details); }}
         />
       )}
 
