@@ -4,149 +4,180 @@ import { Request, Response } from "express";
 const prisma = new PrismaClient();
 
 /**
- * FunÁ„o auxiliar para recalcular a notaFinal de uma redaÁ„o
+ * Recalcula notaFinal da reda√ß√£o combinando notaGerada (IA) e m√©dia das avalia√ß√µes humanas.
  */
 const recalcularNotaFinal = async (redacaoId: string) => {
-    const redacao = await prisma.redacao.findUnique({
-        where: { id: redacaoId },
-        include: { avaliacoes: true },
-    });
+  const redacao = await prisma.redacao.findUnique({
+    where: { id: redacaoId },
+    select: { notaGerada: true },
+  });
 
-    if (!redacao) return;
+  const avaliacoes = await prisma.avaliacao.findMany({
+    where: { redacaoId },
+    select: { notaComp: true },
+  });
 
-    const { notaGerada, avaliacoes } = redacao;
+  const mediaAvaliacoes =
+    avaliacoes.length > 0
+      ? avaliacoes.reduce((acc, av) => acc + av.notaComp, 0) / avaliacoes.length
+      : null;
 
-    // mÈdia das avaliaÁıes humanas
-    let mediaAvaliacoes: number | null = null;
-    if (avaliacoes.length > 0) {
-        const soma = avaliacoes.reduce((acc, av) => acc + av.notaComp, 0);
-        mediaAvaliacoes = soma / avaliacoes.length;
-    }
+  let notaFinal: number | null = null;
 
-    let notaFinal: number | null = null;
+  if (redacao?.notaGerada != null && mediaAvaliacoes != null) {
+    notaFinal = (redacao.notaGerada + mediaAvaliacoes) / 2;
+  } else if (redacao?.notaGerada != null) {
+    notaFinal = redacao.notaGerada;
+  } else if (mediaAvaliacoes != null) {
+    notaFinal = mediaAvaliacoes;
+  } else {
+    notaFinal = null;
+  }
 
-    // regra de negÛcio:
-    if (notaGerada !== null && mediaAvaliacoes !== null) {
-        notaFinal = (notaGerada + mediaAvaliacoes) / 2; // combinaÁ„o IA + humano
-    } else if (notaGerada !== null) {
-        notaFinal = notaGerada; // sÛ IA
-    } else if (mediaAvaliacoes !== null) {
-        notaFinal = mediaAvaliacoes; // sÛ humano
-    }
-
-    await prisma.redacao.update({
-        where: { id: redacaoId },
-        data: { notaFinal },
-    });
-};
-
-export const obterAvaliacao = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-
-        const avaliacao = await prisma.avaliacao.findUnique({
-            where: { id },
-        });
-
-        if (!avaliacao) {
-            return res.status(404).json({ erro: "AvaliaÁ„o n„o encontrada." });
-        }
-
-        return res.json(avaliacao);
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao buscar avaliaÁ„o." });
-    }
+  await prisma.redacao.update({
+    where: { id: redacaoId },
+    data: { notaFinal },
+  });
 };
 
 /**
- * Listar todas as avaliaÁıes de uma redaÁ„o
+ * Listar todas as avalia√ß√µes de uma reda√ß√£o
  */
 export const listarAvaliacoes = async (req: Request, res: Response) => {
-    try {
-        const { redacaoId } = req.params;
-
-        const avaliacoes = await prisma.avaliacao.findMany({
-            where: { redacaoId },
-        });
-
-        return res.json(avaliacoes);
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao listar avaliaÁıes." });
-    }
+  try {
+    const { redacaoId } = req.params;
+    const avaliacoes = await prisma.avaliacao.findMany({
+      where: { redacaoId },
+      orderBy: { id: "asc" },
+    });
+    return res.json(avaliacoes);
+  } catch (error) {
+    console.error("Erro ao listar avalia√ß√µes:", error);
+    return res.status(500).json({ erro: "Erro ao listar avalia√ß√µes." });
+  }
 };
 
 /**
- * Criar uma avaliaÁ„o
+ * Obter uma avalia√ß√£o espec√≠fica
+ */
+export const obterAvaliacao = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const avaliacao = await prisma.avaliacao.findUnique({ where: { id } });
+
+    if (!avaliacao) return res.status(404).json({ erro: "Avalia√ß√£o n√£o encontrada." });
+
+    return res.json(avaliacao);
+  } catch (error) {
+    console.error("Erro ao obter avalia√ß√£o:", error);
+    return res.status(500).json({ erro: "Erro ao buscar avalia√ß√£o." });
+  }
+};
+
+/**
+ * Criar uma avalia√ß√£o
  */
 export const criarAvaliacao = async (req: Request, res: Response) => {
-    try {
-        const { redacaoId } = req.params;
-        const { competencia, notaComp, comentario } = req.body;
+  try {
+    const usuarioId = (req as any).userId;
+    if (!usuarioId) return res.status(401).json({ erro: "Usu√°rio n√£o autenticado." });
 
-        const avaliacao = await prisma.avaliacao.create({
-            data: {
-                competencia,
-                notaComp,
-                comentario,
-                redacaoId,
-            },
-        });
+    const { redacaoId } = req.params;
+    const { competencia, notaComp, comentario } = req.body;
 
-        // Recalcular notaFinal da redaÁ„o
-        await recalcularNotaFinal(redacaoId);
-
-        return res.status(201).json(avaliacao);
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao criar avaliaÁ„o." });
+    // Valida√ß√µes b√°sicas
+    if (typeof competencia !== 'number' || competencia < 1 || competencia > 5) {
+      return res.status(400).json({ erro: "Compet√™ncia deve ser um inteiro entre 1 e 5." });
     }
+    if (typeof notaComp !== 'number' || notaComp < 0 || notaComp > 200) {
+      return res.status(400).json({ erro: "notaComp deve ser um n√∫mero entre 0 e 200." });
+    }
+
+    // Verifica exist√™ncia da reda√ß√£o
+    const redacao = await prisma.redacao.findUnique({ where: { id: redacaoId } });
+    if (!redacao) return res.status(404).json({ erro: "Reda√ß√£o n√£o encontrada." });
+
+    // Impede duplicidade de compet√™ncia para a mesma reda√ß√£o (sem avaliadorId no schema)
+    const existente = await prisma.avaliacao.findFirst({
+      where: { redacaoId, competencia },
+    });
+    if (existente) {
+      return res.status(400).json({ erro: "J√° existe avalia√ß√£o para esta compet√™ncia nesta reda√ß√£o." });
+    }
+
+    const avaliacao = await prisma.avaliacao.create({
+      data: { competencia, notaComp, comentario, redacaoId },
+    });
+
+    // Recalcular notaFinal da reda√ß√£o (combina IA + humanos)
+    await recalcularNotaFinal(redacaoId);
+
+    return res.status(201).json(avaliacao);
+  } catch (error) {
+    console.error("Erro ao criar avalia√ß√£o:", error);
+    return res.status(500).json({ erro: "Erro ao criar avalia√ß√£o." });
+  }
 };
 
 /**
- * Atualizar uma avaliaÁ„o
+ * Atualizar avalia√ß√£o
  */
 export const atualizarAvaliacao = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const { competencia, notaComp, comentario } = req.body;
+  try {
+    const usuarioId = (req as any).userId;
+    if (!usuarioId) return res.status(401).json({ erro: "Usu√°rio n√£o autenticado." });
 
-        const avaliacaoExistente = await prisma.avaliacao.findUnique({
-            where: { id },
-        });
+    const { id } = req.params;
+    const { competencia, notaComp, comentario } = req.body;
 
-        if (!avaliacaoExistente) {
-            return res.status(404).json({ erro: "AvaliaÁ„o n„o encontrada." });
-        }
-
-        const avaliacao = await prisma.avaliacao.update({
-            where: { id },
-            data: { competencia, notaComp, comentario },
-        });
-
-        // Recalcular notaFinal da redaÁ„o
-        await recalcularNotaFinal(avaliacao.redacaoId);
-
-        return res.json(avaliacao);
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao atualizar avaliaÁ„o." });
+    // Valida√ß√µes b√°sicas
+    if (typeof competencia !== 'number' || competencia < 1 || competencia > 5) {
+      return res.status(400).json({ erro: "Compet√™ncia deve ser um inteiro entre 1 e 5." });
     }
+    if (typeof notaComp !== 'number' || notaComp < 0 || notaComp > 200) {
+      return res.status(400).json({ erro: "notaComp deve ser um n√∫mero entre 0 e 200." });
+    }
+
+    const avaliacaoExistente = await prisma.avaliacao.findUnique({ where: { id } });
+    if (!avaliacaoExistente) return res.status(404).json({ erro: "Avalia√ß√£o n√£o encontrada." });
+
+    // Atualiza
+    const avaliacao = await prisma.avaliacao.update({
+      where: { id },
+      data: { competencia, notaComp, comentario },
+    });
+
+    // Recalcular notaFinal da reda√ß√£o
+    await recalcularNotaFinal(avaliacao.redacaoId);
+
+    return res.json(avaliacao);
+  } catch (error) {
+    console.error("Erro ao atualizar avalia√ß√£o:", error);
+    return res.status(500).json({ erro: "Erro ao atualizar avalia√ß√£o." });
+  }
 };
 
 /**
- * Excluir uma avaliaÁ„o
+ * Deletar avalia√ß√£o
  */
 export const deletarAvaliacao = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
+  try {
+    const usuarioId = (req as any).userId;
+    if (!usuarioId) return res.status(401).json({ erro: "Usu√°rio n√£o autenticado." });
 
-        const avaliacao = await prisma.avaliacao.delete({
-            where: { id },
-        });
+    const { id } = req.params;
 
-        // Recalcular notaFinal da redaÁ„o
-        await recalcularNotaFinal(avaliacao.redacaoId);
+    const avaliacao = await prisma.avaliacao.findUnique({ where: { id } });
+    if (!avaliacao) return res.status(404).json({ erro: "Avalia√ß√£o n√£o encontrada." });
 
-        return res.json({ mensagem: "AvaliaÁ„o excluÌda com sucesso." });
-    } catch (error) {
-        return res.status(500).json({ erro: "Erro ao excluir avaliaÁ„o." });
-    }
+    await prisma.avaliacao.delete({ where: { id } });
+
+    // Recalcular notaFinal da reda√ß√£o
+    await recalcularNotaFinal(avaliacao.redacaoId);
+
+    return res.json({ mensagem: "Avalia√ß√£o exclu√≠da com sucesso." });
+  } catch (error) {
+    console.error("Erro ao deletar avalia√ß√£o:", error);
+    return res.status(500).json({ erro: "Erro ao excluir avalia√ß√£o." });
+  }
 };
