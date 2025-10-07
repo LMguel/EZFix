@@ -1,7 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import { Request, Response } from "express";
-import { extrairTextoDaImagem, gerarNotaAutomatica } from "../services/ocrService";
+import { extrairTextoDaImagem, gerarNotaAutomatica, OCRResult } from "../services/ocrService";
 import { analisarTexto } from "../services/analiseService";
+import { analisarEnem } from "../services/ennAnalysisService";
+import { formatarTextoComLLM } from "../services/ennAnalysisService";
 
 
 const prisma = new PrismaClient();
@@ -58,27 +60,44 @@ export const criarRedacao = async (req: Request, res: Response) => {
         console.log("Criando redação:", { titulo, imageType: imagemUrl.startsWith('data:') ? 'base64' : 'url' });
 
         // 1) Extrair texto da imagem
-        let textoExtraido: string;
+        let ocrResult: OCRResult | null = null;
         try {
-            textoExtraido = await extrairTextoDaImagem(imagemUrl);
+            ocrResult = await extrairTextoDaImagem(imagemUrl);
         } catch (ocrError) {
             console.error("Erro específico no OCR:", ocrError);
-            // Continuar mesmo com erro de OCR, salvando sem texto
-            textoExtraido = "Erro ao processar OCR - texto não pôde ser extraído.";
+            // Continuar mesmo com erro de OCR
+            ocrResult = { text: 'Erro ao processar OCR - texto não pôde ser extraído.', confidence: 0, engine: 'mixed' };
         }
+
+        const textoExtraido = ocrResult?.text || '';
 
         // 2) Gerar nota automática
         const notaGerada = gerarNotaAutomatica(textoExtraido);
 
-        // 3) Analisar texto e gerar feedback
-        const analise = analisarTexto(textoExtraido);
+        // 3) Analisar texto e gerar feedback local
+        const analiseLocal = analisarTexto(textoExtraido);
+
+        // 4) Tentar formatar o texto com LLM para apresentação mais legível (opcional)
+        let textoFormatado = textoExtraido;
+        let correcoesSugeridas: any[] = [];
+        try {
+            const formatted = await formatarTextoComLLM(textoExtraido);
+            if (formatted && typeof formatted === 'object' && (formatted as any).textoFormatado) {
+                textoFormatado = (formatted as any).textoFormatado || textoExtraido;
+                correcoesSugeridas = (formatted as any).correcoes || [];
+            } else if (typeof formatted === 'string') {
+                textoFormatado = formatted;
+            }
+        } catch (fmtErr) {
+            console.warn('Formatação com LLM falhou, usando texto OCR bruto:', fmtErr);
+        }
 
         // 4) Salvar no banco
         const redacao = await prisma.redacao.create({
             data: {
                 titulo,
                 imagemUrl: imagemUrl.length > 1000 ? imagemUrl.substring(0, 1000) + "..." : imagemUrl, // Truncar se muito longo
-                textoExtraido,
+                textoExtraido: textoFormatado,
                 notaGerada,
                 usuarioId,
             },
@@ -86,10 +105,12 @@ export const criarRedacao = async (req: Request, res: Response) => {
 
         console.log("Redação criada com sucesso:", redacao.id);
         
-        // Retornar redação com análise
+        // Retornar redação com análise e correções sugeridas
         return res.status(201).json({
             ...redacao,
-            analise
+            ocr: ocrResult,
+            analise: analiseLocal,
+            correcoesSugeridas
         });
     } catch (error) {
         console.error("Erro ao criar redação:", error);
@@ -123,12 +144,13 @@ export const atualizarRedacao = async (req: Request, res: Response) => {
             return res.status(404).json({ erro: "Redação não encontrada." });
         }
 
-        let novoTextoExtraido = textoExtraido ?? redacao.textoExtraido;
+    let novoTextoExtraido = textoExtraido ?? redacao.textoExtraido;
         let novaNotaGerada = redacao.notaGerada;
 
         // ⚡ Se imagem foi alterada → rodar OCR novamente
         if (imagemUrl && imagemUrl !== redacao.imagemUrl) {
-            novoTextoExtraido = await extrairTextoDaImagem(imagemUrl);
+            const newOcr = await extrairTextoDaImagem(imagemUrl);
+            novoTextoExtraido = newOcr?.text || '';
             novaNotaGerada = gerarNotaAutomatica(novoTextoExtraido || "");
         }
 
@@ -143,10 +165,48 @@ export const atualizarRedacao = async (req: Request, res: Response) => {
             },
         });
 
-        return res.json(redacaoAtualizada);
+        // se usuário enviou texto para re-análise, executar análise ENEM com LLM novamente
+        let analiseAtualizada = null;
+        try {
+            const textoParaAnalise = novoTextoExtraido || redacaoAtualizada.textoExtraido || '';
+            const formatted = await formatarTextoComLLM(textoParaAnalise);
+            let textoFmt = textoParaAnalise;
+            if (formatted && typeof formatted === 'object' && (formatted as any).textoFormatado) {
+                textoFmt = (formatted as any).textoFormatado;
+            } else if (typeof formatted === 'string') textoFmt = formatted;
+            analiseAtualizada = await analisarEnem(textoFmt);
+        } catch (e) {
+            console.warn('Falha ao reanalisar redação atualizada:', e);
+        }
+
+        return res.json({ redacao: redacaoAtualizada, analise: analiseAtualizada });
     } catch (error) {
         console.error("Erro ao atualizar redação:", error);
         return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
+    }
+};
+
+// Endpoint: reanalisar texto manualmente (o frontend pode enviar texto editado e receber análise ENEM)
+export const reanalisarTexto = async (req: Request, res: Response) => {
+    try {
+        const { texto } = req.body;
+        if (!texto || texto.trim().length === 0) return res.status(400).json({ erro: 'Texto inválido para reanálise.' });
+
+        // formatar e analisar (o formatador agora retorna objeto com correcoes)
+        const formatted = await formatarTextoComLLM(texto);
+        let textoFmt = texto;
+        let correcoes: any[] = [];
+        if (formatted && typeof formatted === 'object') {
+            textoFmt = (formatted as any).textoFormatado || texto;
+            correcoes = (formatted as any).correcoes || [];
+        } else if (typeof formatted === 'string') textoFmt = formatted;
+
+        const analise = await analisarEnem(textoFmt);
+
+        return res.json({ textoFormatado: textoFmt, correcoes, analise });
+    } catch (e) {
+        console.error('Erro ao reanalisar texto:', e);
+        return res.status(500).json({ erro: 'Erro ao reanalisar texto.' });
     }
 };
 
@@ -165,16 +225,91 @@ export const obterAnaliseRedacao = async (req: Request, res: Response) => {
             return res.status(404).json({ erro: "Redação não encontrada." });
         }
 
-        // Gerar análise do texto
+        // Gerar análise do texto (local) e retorno também detalhes de OCR se disponíveis
         const analise = analisarTexto(redacao.textoExtraido || "");
-
-        return res.json({
-            redacao,
-            analise
-        });
+        return res.json({ redacao, analise });
     } catch (error) {
         console.error("Erro ao obter análise:", error);
         return res.status(500).json({ erro: "Erro interno do servidor." });
+    }
+};
+
+// Obter análise ENEM de uma redação específica (usa LLM)
+export const obterAnaliseEnem = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const usuarioId = req.userId;
+
+        const redacao = await prisma.redacao.findFirst({
+            where: { id, usuarioId },
+        });
+
+        if (!redacao) return res.status(404).json({ erro: 'Redação não encontrada.' });
+
+        const texto = redacao.textoExtraido || '';
+        // tentar extrair OCR detalhado da imagem (linhas/confiança) para expor ao frontend
+        let ocrDetails = null;
+        try {
+            ocrDetails = await extrairTextoDaImagem(redacao.imagemUrl || '');
+        } catch (e) {
+            console.warn('Falha ao obter OCR detalhado para análise ENEM:', e);
+        }
+
+        // formatar o texto com LLM para ficar mais legível antes da análise ENEM
+        let textoFormatado = texto;
+        let correcoesParaFrontend: any[] = [];
+        try {
+            const fmt = await formatarTextoComLLM(texto);
+            if (fmt && typeof fmt === 'object') {
+                textoFormatado = (fmt as any).textoFormatado || texto;
+                correcoesParaFrontend = (fmt as any).correcoes || [];
+            } else if (typeof fmt === 'string') {
+                textoFormatado = fmt;
+            }
+        } catch (e) {
+            console.warn('Falha ao formatar texto antes da análise ENEM:', e);
+        }
+
+        // rodar a análise ENEM (LLM ou fallback) usando o texto formatado
+        const analiseEnem = await analisarEnem(textoFormatado);
+
+        // calcular análise local (estatísticas e pontuação) para preencher campos esperados pelo frontend
+        const analiseLocal = analisarTexto(textoFormatado);
+
+        // montar objeto combinado: priorizar campos do ENEM, mas garantir pontuacao/estatisticas
+    console.log('analiseLocal.qualidadeOCR:', analiseLocal?.qualidadeOCR);
+        const analiseCombinada = {
+            ...analiseEnem,
+            // manter compatibilidade com frontend que espera 'pontuacao' e 'estatisticas'
+            pontuacao: (analiseLocal && (analiseLocal.pontuacao ?? 0)) || 0,
+            estatisticas: (analiseLocal && analiseLocal.estatisticas) || { palavras: 0, caracteres: 0, paragrafos: 0, frases: 0 },
+            qualidadeOCR: (analiseLocal && analiseLocal.qualidadeOCR) || { nivel: 'baixa', problemas: [], confiabilidade: 0 },
+            // harmonizar nomes de arrays
+            pontosPositivos: analiseEnem.pontosFavoraveis || analiseEnem.comentarios || analiseLocal.pontosPositivos || [],
+            pontosNegativos: analiseEnem.pontosMelhoria || analiseLocal.pontosNegativos || [],
+            sugestoes: analiseEnem.sugestoes || analiseLocal.sugestoes || []
+        } as any;
+        // Mapear para os critérios solicitados C1..C5 (0-10)
+        const getNota = (pathObj: any, fallback: number) => {
+            if (!pathObj && typeof fallback === 'number') return fallback;
+            return typeof pathObj === 'number' ? pathObj : (pathObj && pathObj.nota ? pathObj.nota : fallback);
+        };
+
+        const criterios = {
+            C1: Math.round((getNota(analiseCombinada.detalhamento?.norma, analiseCombinada.breakdown?.norma || 0) || 0) * 10) / 10,
+            C2: Math.round((getNota(analiseCombinada.detalhamento?.tese, analiseCombinada.breakdown?.tese || 0) || 0) * 10) / 10,
+            C3: Math.round((getNota(analiseCombinada.detalhamento?.argumentos, analiseCombinada.breakdown?.argumentos || 0) || 0) * 10) / 10,
+            C4: Math.round((getNota(analiseCombinada.detalhamento?.coesao, analiseCombinada.breakdown?.coesao || 0) || 0) * 10) / 10,
+            C5: Math.round((getNota(analiseCombinada.detalhamento?.repertorio, analiseCombinada.breakdown?.repertorio || 0) || 0) * 10) / 10,
+        };
+
+        // incluir criterios no objeto de analise para facilitar consumo no frontend
+        (analiseCombinada as any).criterios = criterios;
+
+    return res.json({ redacao, ocr: ocrDetails, textoFormatado, correcoes: correcoesParaFrontend, analise: analiseCombinada });
+    } catch (error) {
+        console.error('Erro ao obter análise ENEM:', error);
+        return res.status(500).json({ erro: 'Erro ao gerar análise ENEM.' });
     }
 };
 

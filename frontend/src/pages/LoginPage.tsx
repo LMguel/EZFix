@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/api';
 
 interface LoginPageProps {
@@ -14,6 +15,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +30,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         });
         authService.setToken(response.token);
         onLogin();
+        // redirecionar para dashboard após login
+        navigate('/dashboard');
       } else {
         await authService.register({
           nome: formData.nome,

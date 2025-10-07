@@ -76,6 +76,21 @@ export const redacaoService = {
     return response.data;
   },
 
+  getAnaliseEnem: async (id: string): Promise<any> => {
+    const response = await api.get(`/redacoes/${id}/analise-enem`);
+    return response.data;
+  },
+
+  getTextoRaw: async (id: string): Promise<string> => {
+    const response = await api.get(`/redacoes/${id}`);
+    return response.data.textoExtraido || '';
+  },
+
+  reanalyze: async (texto: string): Promise<any> => {
+    const response = await api.post(`/redacoes/reanalisar`, { texto });
+    return response.data;
+  },
+
   create: async (data: CreateRedacaoRequest): Promise<Redacao> => {
     const response = await api.post('/redacoes', data);
     return response.data;
