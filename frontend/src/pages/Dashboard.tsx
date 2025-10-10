@@ -97,27 +97,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     setUploadLoading(true);
 
     try {
-      // abrir modal de processamento com etapa inicial
-      setProcessingOpen(true);
-      setProcessingStep('Pré-processando imagem');
-      setProcessingDetails('Ajustando contraste e preparando para OCR...');
-      let imagemUrl = newRedacao.imagemUrl;
-      
-      // Se o usuário forneceu uma URL, use-a; caso contrário converta o arquivo inteiro para base64
-      if (newRedacao.imagemUrl) {
-        imagemUrl = newRedacao.imagemUrl;
-      } else if (selectedFile) {
-        imagemUrl = await convertFileToBase64(selectedFile, null);
+  // abrir modal de processamento com etapa inicial
+  setProcessingOpen(true);
+  setProcessingStep('Lendo redação.');
+  setProcessingDetails('Extraindo texto com Azure Vision...');
+      // Quando houver arquivo selecionado, usar upload multipart (FormData)
+      let created;
+      if (selectedFile) {
+        const fd = new FormData();
+        fd.append('titulo', newRedacao.titulo);
+        fd.append('file', selectedFile);
+        setProcessingStep('Enviando arquivo para OCR');
+        setProcessingDetails('Upload de imagem (multipart)...');
+        created = await redacaoService.createWithFile(fd);
+      } else {
+        let imagemUrl = newRedacao.imagemUrl;
+        // indicar que o OCR está em progresso
+        setProcessingStep('Extraindo texto (OCR)');
+        setProcessingDetails('Executando OCR otimizado (pode levar alguns segundos)');
+        created = await redacaoService.create({ titulo: newRedacao.titulo, imagemUrl: imagemUrl });
       }
-
-      // indicar que o OCR está em progresso
-      setProcessingStep('Extraindo texto (OCR)');
-      setProcessingDetails('Executando OCR otimizado (pode levar alguns segundos)');
-
-      const created = await redacaoService.create({
-        titulo: newRedacao.titulo,
-        imagemUrl: imagemUrl,
-      });
 
       setNewRedacao({ titulo: '', imagemUrl: '' });
       setSelectedFile(null);
@@ -125,21 +124,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       loadRedacoes();
 
   // Indicar que a análise GPT será iniciada
-  setProcessingStep('Analisando com GPT');
-  setProcessingDetails('Enviando texto extraído para o modelo para avaliação ENEM...');
+  setProcessingStep('Analisando redação');
+  setProcessingDetails('Enviando texto extraído para o modelo para correções e avaliação ENEM...');
 
   // Abrir modal de análise automaticamente (o componente fará a chamada ENEM)
   setRedacaoAnaliseId(created.id);
   setAnaliseModalOpen(true);
-  // fechar modal de processamento após abrir analise
-  setTimeout(() => setProcessingOpen(false), 800);
+  // manter modal de processamento aberto; o componente de análise chamará onClose quando finalizar
     } catch (error: any) {
       console.error('Erro ao enviar redação:', error);
-      
+      // garantir que o modal de processamento seja fechado para evitar spinner infinito
+      setProcessingOpen(false);
       if (error.response?.status === 413) {
         alert('Imagem muito grande! Tente com uma imagem menor (máx 5MB).');
       } else if (error.response?.status === 400) {
-        alert(error.response?.data?.erro || 'Dados inválidos. Verifique o título e a imagem.');
+        alert(error.response?.data?.erro || 'Imagem inválida ou corrompida. Verifique o arquivo e tente novamente.');
       } else {
         alert(error.response?.data?.erro || 'Erro ao enviar redação. Tente novamente.');
       }
@@ -209,6 +208,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     
   setSelectedFile(file);
   setNewRedacao({ ...newRedacao, imagemUrl: '' });
+  // abrir automaticamente a aba/modal de preview ao anexar a imagem
+  setShowUploadModal(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -295,10 +296,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           </div>
           
           <nav className="hidden md:flex space-x-8">
-            <a href="#" className="text-gray-600 hover:text-gray-800">Dashboard</a>
-            <a href="#" className="text-gray-600 hover:text-gray-800">Redações</a>
-            <a href="#" className="text-gray-600 hover:text-gray-800">Turmas</a>
-            <a href="#" className="text-gray-600 hover:text-gray-800">Relatórios</a>
+            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Dashboard</button>
+            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Redações</button>
+            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Turmas</button>
+            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Relatórios</button>
           </nav>
 
           <div className="flex items-center space-x-4">
@@ -676,7 +677,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                   disabled={uploadLoading || (!selectedFile && !newRedacao.imagemUrl)}
                   className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {uploadLoading ? 'Enviando...' : 'Enviar'}
+                  {uploadLoading ? 'Processando...' : 'Confirmar'}
                 </button>
               </div>
             </form>
@@ -693,7 +694,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           redacaoId={redacaoAnaliseId}
           isVisible={analiseModalOpen}
           onClose={fecharAnalise}
-          onProgress={(step, details) => { setProcessingOpen(true); setProcessingStep(step); setProcessingDetails(details); }}
+          onProgress={(step, details) => {
+            setProcessingOpen(true);
+            setProcessingStep(step);
+            setProcessingDetails(details);
+            try {
+              const s = (step || '').toString().toLowerCase();
+              if (s.includes('conclu') || s.includes('concluído') || s.includes('concluida')) {
+                // quando análise concluída, fechar modal de processamento
+                setProcessingOpen(false);
+              }
+            } catch (e) {
+              // ignore
+            }
+          }}
         />
       )}
 

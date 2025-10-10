@@ -6,6 +6,9 @@ const azureKey = process.env.AZURE_OPENAI_KEY || '';
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || '';
 const azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-11-22';
 
+// memória simples: se detectarmos erro 404 no Azure, desabilitamos tentativas futuras
+let azureDisabled = false;
+
 if (!apiKey && !(azureEndpoint && azureKey && azureDeployment)) {
   console.warn('Nenhuma chave OpenAI detectada. Configure OPENAI_API_KEY ou as variáveis AZURE_OPENAI_* para habilitar chamadas ao LLM.');
 }
@@ -15,7 +18,7 @@ const client = apiKey ? new OpenAI({ apiKey }) : null;
 
 export async function chamarLLM(prompt: string, maxTokens = 1000) {
   // Se houver configuração Azure, usar o endpoint de Azure OpenAI (REST)
-  if (azureEndpoint && azureKey && azureDeployment) {
+  if (!azureDisabled && azureEndpoint && azureKey && azureDeployment) {
     // Normaliza: se o endpoint configurado já tiver path (/openai/...), extrai só a origem
     let endpointOrigin = azureEndpoint.replace(/\/+$/,'');
     try {
@@ -62,7 +65,10 @@ export async function chamarLLM(prompt: string, maxTokens = 1000) {
         return JSON.stringify(json, null, 2);
       } else {
         // Se não for 404, reportar erro; caso 404, tentaremos chat completions
-        if (res.status !== 404) {
+        if (res.status === 404) {
+          // desabilitar tentativas Azure por enquanto (deployment/endpoint possivelmente inválido)
+          azureDisabled = true;
+        } else {
           const text = await res.text();
           throw new Error(`Erro Azure Responses: ${res.status} ${text}`);
         }
@@ -72,54 +78,79 @@ export async function chamarLLM(prompt: string, maxTokens = 1000) {
       // senão, continua para tentar chat
     }
 
-    // 2) Tentar chat completions
+    // 2) Tentar chat completions (Azure) - leia o corpo UMA vez e trate 404
     const chatBody = {
       messages: [{ role: 'user', content: prompt }],
       max_tokens: maxTokens,
       temperature: 0.0,
     } as any;
 
-    const chatRes = await fetch(chatUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': azureKey,
-      },
-      body: JSON.stringify(chatBody),
-    });
+    try {
+      const chatRes = await fetch(chatUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': azureKey,
+        },
+        body: JSON.stringify(chatBody),
+      });
 
-    if (!chatRes.ok) {
-      const text = await chatRes.text();
-      throw new Error(`Erro Azure Chat Completions: ${chatRes.status} ${text}`);
-    }
-
-    const chatJson: any = await chatRes.json();
-    if (chatJson && typeof chatJson === 'object') {
-      if (chatJson.choices && Array.isArray(chatJson.choices) && chatJson.choices.length > 0) {
-        const first = chatJson.choices[0];
-        if (first.message && first.message.content) return first.message.content;
-        if (first.text) return first.text;
+      const chatText = await chatRes.text();
+      if (!chatRes.ok) {
+        if (chatRes.status === 404) {
+          azureDisabled = true; // marca para pular Azure em futuras chamadas
+          // cairá no fallback abaixo
+        } else {
+          throw new Error(`Erro Azure Chat Completions: ${chatRes.status} ${chatText}`);
+        }
+      } else {
+        // tentar parse seguro do JSON de resposta
+        try {
+          const chatJson = JSON.parse(chatText);
+          if (chatJson && typeof chatJson === 'object') {
+            if (chatJson.choices && Array.isArray(chatJson.choices) && chatJson.choices.length > 0) {
+              const first = chatJson.choices[0];
+              if (first.message && first.message.content) return first.message.content;
+              if (first.text) return first.text;
+            }
+            if (chatJson.output_text && typeof chatJson.output_text === 'string') return chatJson.output_text;
+          }
+          return JSON.stringify(chatJson, null, 2);
+        } catch (parseErr) {
+          // se não for JSON válido, retornar o texto cru
+          return chatText;
+        }
       }
-      if (chatJson.output_text && typeof chatJson.output_text === 'string') return chatJson.output_text;
+    } catch (err) {
+      // se algo deu errado na tentativa de chat Azure, não quebramos a cadeia — cairá no fallback
+      console.warn('Erro ao chamar Azure Chat Completions:', String(err));
     }
-
-    return JSON.stringify(chatJson, null, 2);
   }
 
-  // Caso contrário, usar OpenAI público via SDK
-  if (!client) throw new Error('OPENAI_API_KEY não configurada e Azure não configurado');
+  // Se chegamos até aqui, Azure está indisponível (ou não configurado) — tentar OpenAI público se configurado
+  if (client) {
+    try {
+      const response: any = await client.responses.create({
+        model: 'gpt-4o-mini',
+        input: prompt,
+        max_output_tokens: maxTokens,
+        temperature: 0.0,
+      } as any);
 
-  const response: any = await client.responses.create({
-    model: 'gpt-4o-mini',
-    input: prompt,
-    max_output_tokens: maxTokens,
-    temperature: 0.0,
-  } as any);
+      if (response.output_text && typeof response.output_text === 'string') return response.output_text;
+      try { return JSON.stringify(response.output || response, null, 2); } catch (err) { return String(response); }
+    } catch (e) {
+      // se falhar também, cair no fallback simples abaixo
+  console.warn('Falha ao chamar OpenAI público como fallback:', String(e));
+    }
+  }
 
-  if (response.output_text && typeof response.output_text === 'string') return response.output_text;
+  // Fallback simples: retornar o prompt de entrada (ou uma versão ligeiramente normalizada)
   try {
-    return JSON.stringify(response.output || response, null, 2);
-  } catch (err) {
-    return String(response);
+    // Normalização mínima: remover múltiplos espaços e quebras duplicadas
+    const fallback = prompt.replace(/\s{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
+    return fallback;
+  } catch (e) {
+    return prompt;
   }
 }

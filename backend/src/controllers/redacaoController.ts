@@ -46,7 +46,10 @@ export const obterRedacao = async (req: Request, res: Response) => {
 // Criar nova redação com OCR + nota automática
 export const criarRedacao = async (req: Request, res: Response) => {
     try {
-        const { titulo, imagemUrl } = req.body;
+        const { titulo } = req.body;
+        // imagem pode vir em req.file (upload multipart) ou em req.body.imagemUrl (dataURL/URL)
+    const file = (req as any).file as any | undefined;
+    const imagemUrl = file ? `data:${file.mimetype};base64,${file.buffer.toString('base64')}` : req.body.imagemUrl;
         const usuarioId = req.userId;
 
         if (!usuarioId) {
@@ -54,7 +57,7 @@ export const criarRedacao = async (req: Request, res: Response) => {
         }
 
         if (!titulo || !imagemUrl) {
-            return res.status(400).json({ erro: "Título e imagem são obrigatórios." });
+            return res.status(400).json({ erro: "Título e imagem são obrigatórios. Envie arquivo (field 'file') ou imagemUrl." });
         }
 
         console.log("Criando redação:", { titulo, imageType: imagemUrl.startsWith('data:') ? 'base64' : 'url' });
@@ -63,9 +66,14 @@ export const criarRedacao = async (req: Request, res: Response) => {
         let ocrResult: OCRResult | null = null;
         try {
             ocrResult = await extrairTextoDaImagem(imagemUrl);
-        } catch (ocrError) {
+        } catch (ocrError: any) {
             console.error("Erro específico no OCR:", ocrError);
-            // Continuar mesmo com erro de OCR
+            // Se for erro de imagem inválida/truncada, retornar 400 para o frontend evitar re-submissões em loop
+            const msg = ocrError?.message?.toString() || '';
+            if (msg.includes('truncada') || msg.includes('assinatura do arquivo') || msg.includes('pngload_buffer') || msg.includes('Falha ao decodificar imagem')) {
+                return res.status(400).json({ erro: 'Imagem inválida ou corrompida. Verifique o arquivo enviado (base64/url).' });
+            }
+            // Continuar mesmo com erro de OCR genérico
             ocrResult = { text: 'Erro ao processar OCR - texto não pôde ser extraído.', confidence: 0, engine: 'mixed' };
         }
 
@@ -96,7 +104,8 @@ export const criarRedacao = async (req: Request, res: Response) => {
         const redacao = await prisma.redacao.create({
             data: {
                 titulo,
-                imagemUrl: imagemUrl.length > 1000 ? imagemUrl.substring(0, 1000) + "..." : imagemUrl, // Truncar se muito longo
+                // armazenar a imagem enviada inteira (se o banco suportar); evitar truncamento que causa reprocessamento com base64 corrompido
+                imagemUrl: imagemUrl,
                 textoExtraido: textoFormatado,
                 notaGerada,
                 usuarioId,
@@ -248,11 +257,17 @@ export const obterAnaliseEnem = async (req: Request, res: Response) => {
 
         const texto = redacao.textoExtraido || '';
         // tentar extrair OCR detalhado da imagem (linhas/confiança) para expor ao frontend
-        let ocrDetails = null;
+        let ocrDetails: any = null;
         try {
             ocrDetails = await extrairTextoDaImagem(redacao.imagemUrl || '');
-        } catch (e) {
-            console.warn('Falha ao obter OCR detalhado para análise ENEM:', e);
+        } catch (e: any) {
+            console.warn('Falha ao obter OCR detalhado para análise ENEM:', e?.message || e);
+            const msg = e?.message?.toString() || '';
+            if (msg.includes('truncada') || msg.includes('assinatura do arquivo') || msg.includes('pngload_buffer') || msg.includes('Falha ao decodificar imagem')) {
+                ocrDetails = { erro: 'Imagem inválida ou corrompida (não foi possível extrair detalhes de OCR).' };
+            } else {
+                ocrDetails = { erro: 'Falha ao processar OCR detalhado.' };
+            }
         }
 
         // formatar o texto com LLM para ficar mais legível antes da análise ENEM
@@ -271,7 +286,19 @@ export const obterAnaliseEnem = async (req: Request, res: Response) => {
         }
 
         // rodar a análise ENEM (LLM ou fallback) usando o texto formatado
-        const analiseEnem = await analisarEnem(textoFormatado);
+        let analiseEnem: any = null;
+        try {
+            analiseEnem = await analisarEnem(textoFormatado);
+        } catch (e: any) {
+            console.warn('Falha ao executar analisarEnem (LLM) - retornando análise local como fallback:', e?.message || e);
+            // fallback: usar análise local (estatísticas e mensagens mínimas) para que a rota responda
+            analiseEnem = {
+                pontosFavoraveis: [],
+                pontosMelhoria: [],
+                sugestoes: [],
+                detalheErroLLM: e?.message || 'Erro ao executar LLM',
+            };
+        }
 
         // calcular análise local (estatísticas e pontuação) para preencher campos esperados pelo frontend
         const analiseLocal = analisarTexto(textoFormatado);
