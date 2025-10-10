@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { redacaoService, authService } from '../services/api';
 import { Redacao } from '../types';
 import AnaliseRedacao from '../components/AnaliseRedacao';
@@ -31,23 +31,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [textoModalOpen, setTextoModalOpen] = useState(false);
   const [redacaoTextoSelecionada, setRedacaoTextoSelecionada] = useState<Redacao | null>(null);
 
-  useEffect(() => {
-    loadRedacoes();
-    
-    // Auto-refresh a cada 5 segundos para capturar mudanças de OCR
-    const interval = setInterval(() => {
-      loadRedacoes();
-    }, 5000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadRedacoes = async () => {
+  const loadRedacoes = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       const data = await redacaoService.list();
       setRedacoes(data);
       setLastUpdate(new Date());
-      // buscar rapidamente nota ENEM para as 3 mais recentes (apenas para exibição)
       try {
         const recent = data.slice(0, 3);
         const scores: Record<string, number> = {};
@@ -67,9 +56,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     } catch (error) {
       console.error('Erro ao carregar redações:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Primeira chamada mostra loading
+    loadRedacoes(true);
+
+    // Atualizações periódicas não mostram loading
+    const interval = setInterval(() => {
+      loadRedacoes(false);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [loadRedacoes]);
 
   const abrirAnalise = (id: string) => {
     setRedacaoAnaliseId(id);
@@ -97,10 +98,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     setUploadLoading(true);
 
     try {
-  // abrir modal de processamento com etapa inicial
-  setProcessingOpen(true);
-  setProcessingStep('Lendo redação.');
-  setProcessingDetails('Extraindo texto com Azure Vision...');
+      // abrir modal de processamento com etapa inicial
+      setProcessingOpen(true);
+      setProcessingStep('Lendo redação.');
+      setProcessingDetails('Extraindo texto com Azure Vision...');
       // Quando houver arquivo selecionado, usar upload multipart (FormData)
       let created;
       if (selectedFile) {
@@ -123,14 +124,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       setShowUploadModal(false);
       loadRedacoes();
 
-  // Indicar que a análise GPT será iniciada
-  setProcessingStep('Analisando redação');
-  setProcessingDetails('Enviando texto extraído para o modelo para correções e avaliação ENEM...');
+      // Indicar que a análise GPT será iniciada
+      setProcessingStep('Analisando redação');
+      setProcessingDetails('Enviando texto extraído para o modelo para correções e avaliação ENEM...');
 
-  // Abrir modal de análise automaticamente (o componente fará a chamada ENEM)
-  setRedacaoAnaliseId(created.id);
-  setAnaliseModalOpen(true);
-  // manter modal de processamento aberto; o componente de análise chamará onClose quando finalizar
+      // Abrir modal de análise automaticamente (o componente fará a chamada ENEM)
+      setRedacaoAnaliseId(created.id);
+      setAnaliseModalOpen(true);
+      // manter modal de processamento aberto; o componente de análise chamará onClose quando finalizar
     } catch (error: any) {
       console.error('Erro ao enviar redação:', error);
       // garantir que o modal de processamento seja fechado para evitar spinner infinito
@@ -206,10 +207,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       return;
     }
     
-  setSelectedFile(file);
-  setNewRedacao({ ...newRedacao, imagemUrl: '' });
-  // abrir automaticamente a aba/modal de preview ao anexar a imagem
-  setShowUploadModal(true);
+    setSelectedFile(file);
+    setNewRedacao({ ...newRedacao, imagemUrl: '' });
+    // abrir automaticamente a aba/modal de preview ao anexar a imagem
+    setShowUploadModal(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -493,7 +494,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                   })}
                 </span>
                 <button 
-                  onClick={loadRedacoes}
+                  onClick={() => loadRedacoes()}
                   className="text-purple-600 hover:text-purple-700 text-sm flex items-center gap-1"
                 >
                   🔄 Atualizar

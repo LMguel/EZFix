@@ -4,9 +4,10 @@ interface Props {
   isOpen: boolean;
   step?: string;
   details?: string;
+  ocrDetails?: any;
 }
 
-const ProcessingModal: React.FC<Props> = ({ isOpen, step = 'Preparando', details = '' }) => {
+const ProcessingModal: React.FC<Props> = ({ isOpen, step = 'Preparando', details = '', ocrDetails = null }) => {
   if (!isOpen) return null;
 
   return (
@@ -30,6 +31,13 @@ const ProcessingModal: React.FC<Props> = ({ isOpen, step = 'Preparando', details
             <li>Extração de texto com OCR otimizado</li>
             <li>Análise com GPT (ENEM) para feedback detalhado</li>
           </ul>
+
+          {ocrDetails && (
+            <div className="mt-4 p-3 bg-gray-100 rounded">
+              <h4 className="text-sm font-bold">Detalhes do OCR:</h4>
+              <pre className="text-xs text-gray-700 whitespace-pre-wrap">{JSON.stringify(ocrDetails, null, 2)}</pre>
+            </div>
+          )}
         </div>
 
         <div className="mt-6 text-right">
