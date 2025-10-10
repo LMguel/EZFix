@@ -1,0 +1,24 @@
+﻿feat: melhorias OCR manuscrito, integração Azure/OpenAI, UI de upload e análise ENEM
+
+Resumo das mudanças
+- Pipeline OCR otimizado (Azure Read + fallback), pré-processamento e tiles.
+- Integração com LLM (Azure/OpenAI) para formatar texto e avaliar estilo ENEM.
+- Novos/atualizados endpoints backend: OCR, formatação LLM, análise ENEM, reanalisar.
+- Frontend: Dashboard com upload e modal de análise; edição do texto extraído; aplicar correções sugeridas.
+- Pequenas melhorias e correções em controllers/rotas e tipos.
+
+Como testar rapidamente
+1. Backend:
+   Copy-Item backend\.env.example backend\.env
+   # editar backend\.env com suas chaves locais
+   cd backend; npm install; npm run dev
+   Testar endpoints: POST /redacoes (imagem/base64), GET /redacoes/:id/analise-enem
+
+2. Frontend:
+   cd frontend; npm install; npm start
+   No Dashboard: upload -> Enviar -> abrir Análise
+
+Notas:
+- O template de .env está em backend/.env.example. Não comite .env com chaves.
+- Se ocorrerem problemas com o DB local (backend/prisma/dev.db), favor renomear/backup antes do merge.
+

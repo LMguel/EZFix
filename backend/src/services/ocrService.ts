@@ -130,8 +130,32 @@ export const extrairTextoDaImagem = async (imageUrl: string): Promise<OCRResult>
             buffer = await fs.readFile(imageUrl);
         }
 
+        // Validação rápida do buffer: evitar processar dataURLs truncados que causam "pngload_buffer: end of stream"
+        const isLikelyImage = (buf: Buffer) => {
+            if (!buf || buf.length < 8) return false;
+            const sig = buf.slice(0, 8).toString('hex').toLowerCase();
+            // PNG signature: 89504e470d0a1a0a
+            if (sig.startsWith('89504e470d0a1a0a')) return true;
+            // JPEG: ff d8 ff
+            if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+            // WebP: 'RIFF' + 'WEBP'
+            if (buf.slice(0,4).toString() === 'RIFF' && buf.slice(8,12).toString() === 'WEBP') return true;
+            return false;
+        };
+
+        if (!isLikelyImage(buffer)) {
+            // Throw early with a clear message so callers can handle (and frontend doesn't keep re-sending corrupted base64)
+            throw new Error('Imagem inválida ou truncada (assinatura do arquivo não corresponde a PNG/JPEG/WebP).');
+        }
+
         // Pré-processamento: grayscale, normalizar, aumentar contraste e reduzir ruído
-        let img = sharp(buffer).grayscale().normalize().sharpen();
+        let img;
+        try {
+            img = sharp(buffer).grayscale().normalize().sharpen();
+        } catch (err: any) {
+            // Captura erros de parsing/decodificação do sharp e rethrow com mensagem legível
+            throw new Error(`Falha ao decodificar imagem: ${err?.message || String(err)}`);
+        }
         const meta = await img.metadata();
 
         // limitar dimensão máxima para performance

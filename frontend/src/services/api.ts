@@ -96,6 +96,12 @@ export const redacaoService = {
     return response.data;
   },
 
+  // Envio multipart/form-data com arquivo
+  createWithFile: async (formData: FormData): Promise<Redacao> => {
+    const response = await api.post('/redacoes', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return response.data;
+  },
+
   update: async (id: string, data: Partial<CreateRedacaoRequest>): Promise<Redacao> => {
     const response = await api.put(`/redacoes/${id}`, data);
     return response.data;

@@ -76,7 +76,21 @@ const VisualizarTexto: React.FC<VisualizarTextoProps> = ({ isVisible, onClose, r
                 </h3>
                 <div className="bg-gray-50 border rounded-lg p-4">
                   <pre className="whitespace-pre-wrap font-mono text-sm text-gray-700 leading-relaxed">
-                    {redacao.textoExtraido}
+                    {(() => {
+                      const t = redacao.textoExtraido || '';
+                      // remover instrução de prompt que por vezes aparece no início (quando o LLM retornou o próprio prompt junto)
+                      const promptStart = 'Você é um assistente que formata um texto extraído por OCR';
+                      if (t.startsWith(promptStart)) {
+                        // tentar encontrar o início real do texto (---INICIO TEXTO---)
+                        const marker = '---INICIO TEXTO---';
+                        const idx = t.indexOf(marker);
+                        if (idx !== -1) return t.substring(idx + marker.length).trim();
+                        // caso não encontre, remover a primeira linha grande
+                        const lines = t.split('\n');
+                        return lines.slice(10).join('\n').trim() || t;
+                      }
+                      return t;
+                    })()}
                   </pre>
                 </div>
               </div>

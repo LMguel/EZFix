@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { redacaoService } from '../services/api';
 
 interface AnaliseRedacaoProps {
@@ -44,21 +44,8 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
   const [correcoes, setCorrecoes] = useState<Array<{ original: string; sugerido: string; motivo?: string }>>([]);
   const pollRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (isVisible && redacaoId) {
-      setAnalise(null);
-      setError(null);
-      carregarAnaliseWithPolling();
-    }
-
-    return () => {
-      // limpar qualquer polling pendente
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
-  }, [isVisible, redacaoId]);
-
   // polling: tenta carregar análise a cada 3s por até 30s
-  const carregarAnaliseWithPolling = async () => {
+  const carregarAnaliseWithPolling = useCallback(async () => {
     setLoading(true);
     setError(null);
     onProgress?.('Aguardando análise GPT', 'Solicitando avaliação ao modelo...');
@@ -93,10 +80,24 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
 
     // try imediato e depois interval
     await tryOnce();
-    if (!analise && attempts < maxAttempts) {
+    // iniciar polling caso necessário; o próprio tryOnce irá encerrar o polling quando receber a análise
+    if (pollRef.current === null && attempts < maxAttempts) {
       pollRef.current = window.setInterval(tryOnce, 3000);
     }
-  };
+  }, [redacaoId, onProgress]);
+
+  useEffect(() => {
+    if (isVisible && redacaoId) {
+      setAnalise(null);
+      setError(null);
+      carregarAnaliseWithPolling();
+    }
+
+    return () => {
+      // limpar qualquer polling pendente
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, [isVisible, redacaoId]);
 
   const carregarAnalise = async () => {
     setLoading(true);
