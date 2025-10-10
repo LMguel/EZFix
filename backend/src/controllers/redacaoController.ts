@@ -361,5 +361,3 @@ export const excluirRedacao = async (req: Request, res: Response) => {
         return res.status(500).json({ erro: "Ocorreu um erro no servidor." });
     }
 };
-
-
