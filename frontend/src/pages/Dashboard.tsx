@@ -30,6 +30,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [redacaoAnaliseId, setRedacaoAnaliseId] = useState<string | null>(null);
   const [textoModalOpen, setTextoModalOpen] = useState(false);
   const [redacaoTextoSelecionada, setRedacaoTextoSelecionada] = useState<Redacao | null>(null);
+  const isOcrProcessing = (r: Redacao) =>
+        (r.textoExtraido === undefined || r.textoExtraido === null) && !r.notaFinal;
+  const isOcrNoText = (r: Redacao) =>
+        r.textoExtraido === '' && !r.notaFinal;
+  const isOcrDone = (r: Redacao) =>
+        typeof r.textoExtraido === 'string' && r.textoExtraido.trim() !== '';
 
   const loadRedacoes = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -251,26 +257,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
   };
 
-  const getStatusColor = (redacao: Redacao) => {
-    if (redacao.notaFinal) return 'text-green-600';
-    if (redacao.textoExtraido && redacao.textoExtraido.trim() !== '') return 'text-blue-600'; // Processado
-    if (redacao.textoExtraido === '') return 'text-orange-600'; // OCR processou mas sem texto
-    return 'text-yellow-600'; // Aguardando processamento
-  };
+    const getStatusColor = (r: Redacao) => {
+        if (r.notaFinal) return 'text-green-600';
+        if (isOcrProcessing(r)) return 'text-yellow-600';
+        if (isOcrNoText(r)) return 'text-orange-600';
+        if (isOcrDone(r)) return 'text-blue-600';
+        return 'text-yellow-600';
+    };
 
-  const getStatusText = (redacao: Redacao) => {
-    if (redacao.notaFinal) return 'CORRIGIDA';
-    if (redacao.textoExtraido && redacao.textoExtraido.trim() !== '') return 'PROCESSADA';
-    if (redacao.textoExtraido === '') return 'SEM TEXTO';
-    return 'PROCESSANDO';
-  };
+    const getStatusText = (r: Redacao) => {
+        if (r.notaFinal) return 'CORRIGIDA';
+        if (isOcrProcessing(r)) return 'PROCESSANDO';
+        if (isOcrNoText(r)) return 'SEM TEXTO';
+        if (isOcrDone(r)) return 'PROCESSADA';
+        return 'PROCESSANDO';
+    };
 
-  const getStatusIcon = (redacao: Redacao) => {
-    if (redacao.notaFinal) return '✅';
-    if (redacao.textoExtraido && redacao.textoExtraido.trim() !== '') return '🔍';
-    if (redacao.textoExtraido === '') return '⚠️';
-    return '⏳';
-  };
+    const getStatusIcon = (r: Redacao) => {
+        if (r.notaFinal) return '✅';
+        if (isOcrProcessing(r)) return '⏳';
+        if (isOcrNoText(r)) return '⚠️';
+        if (isOcrDone(r)) return '🔍';
+        return '⏳';
+    };
 
   const redacoesHoje = redacoes.filter(r => 
     new Date(r.criadoEm).toDateString() === new Date().toDateString()
@@ -523,26 +532,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                   </div>
                   
                   {/* Feedback visual baseado no status */}
-                  {redacao.notaFinal ? (
-                    <div className="text-2xl font-bold text-green-600 mb-2">
-                      {redacao.notaFinal.toFixed(1)}
-                    </div>
-                  ) : (
-                    <div className="mb-2">
-                      <div className="text-lg font-semibold text-blue-600">
-                        Nota ENEM: { (enemScores[redacao.id] !== undefined) ? enemScores[redacao.id].toFixed(1) : (redacao.notaGerada !== undefined && redacao.notaGerada !== null ? redacao.notaGerada.toFixed(1) : '—') }
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Qualidade da imagem: {redacao.notaGerada !== null && redacao.notaGerada !== undefined ? `${redacao.notaGerada.toFixed(1)} (Nota OCR)` : 'N/A'}
-                      </div>
-                    </div>
-                  )}
-                    <div className="mb-2">
-                      <div className="flex items-center gap-2 text-yellow-600">
-                        <div className="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
-                        <span className="text-sm">Processando OCR...</span>
-                      </div>
-                    </div>
+                      {isOcrProcessing(redacao) && (
+                          <div className="mb-2">
+                              <div className="flex items-center gap-2 text-yellow-600">
+                                  <div className="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
+                                  <span className="text-sm">Processando OCR...</span>
+                              </div>
+                          </div>
+                      )}
+
+                      {isOcrNoText(redacao) && (
+                          <div className="mb-2 text-orange-600 text-sm">
+                              ⚠️ OCR finalizado, nenhum texto legível foi detectado.
+                          </div>
+                      )}
                   
                   {/* Preview do texto extraído */}
                   {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (

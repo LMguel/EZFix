@@ -95,6 +95,18 @@ export type OCRResult = {
     engine?: 'azure' | 'tesseract' | 'mixed';
 };
 
+type AnalysisStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'succeeded-empty' | 'failed';
+
+interface AnaliseEnem {
+    status: AnalysisStatus;
+    jobId?: string;
+    createdAt?: string;
+    startedAt?: string;
+    completedAt?: string;
+    notaGeral?: number;
+    error?: string;
+}
+
 // Adicione um cache simples no topo do arquivo
 const ocrCache = new Map<string, Promise<OCRResult>>();
 

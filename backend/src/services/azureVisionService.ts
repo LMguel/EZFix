@@ -78,26 +78,42 @@ export async function extractTextWithAzureRead(imageUrlOrBuffer: string | Buffer
     }
 
     // Poll for result
-    const maxAttempts = 30;
-    let attempt = 0;
-    let resultJson: any = null;
-    while (attempt < maxAttempts) {
-      await sleep(1000);
-      const r = await fetch(operationLocation, {
-        method: 'GET',
-        headers: { 'Ocp-Apim-Subscription-Key': AZURE_KEY }
-      });
-      if (!r.ok) {
-        attempt++;
-        continue;
-      }
-      resultJson = await r.json();
-      const status = resultJson.status || resultJson.analyzeResult?.status || resultJson.status === 'succeeded' ? 'succeeded' : resultJson.status;
-      if (status && (status.toLowerCase() === 'succeeded' || status.toLowerCase() === 'succeeded')) break;
-      attempt++;
-    }
+      const maxAttempts = 30;
+      let attempt = 0;
+      let resultJson: any = null;
 
-    if (!resultJson) return null;
+      while (attempt < maxAttempts) {
+          await sleep(1000);
+
+          const r = await fetch(operationLocation, {
+              method: 'GET',
+              headers: { 'Ocp-Apim-Subscription-Key': AZURE_KEY },
+          });
+
+          if (!r.ok) {
+              attempt++;
+              continue;
+          }
+
+          const body = await r.json();
+          const rawStatus = (body.status ?? body.analyzeResult?.status ?? '').toString().toLowerCase();
+
+          if (rawStatus === 'succeeded') {
+              resultJson = body;
+              break;
+          }
+          if (rawStatus === 'failed') {
+              // opcional: log detalhado
+              const err = body.error || body.analyzeResult?.errors || body;
+              throw new Error(`Azure Read falhou: ${JSON.stringify(err)}`);
+          }
+
+          attempt++;
+      }
+
+      if (!resultJson) {
+          throw new Error('Azure Read timeout (status não chegou a "succeeded").');
+      }
 
     // parse possible shapes and extract lines with bounding boxes
     const readResults = resultJson.analyzeResult?.readResults || resultJson.readResults || resultJson.analyzeResult?.pageResults || [];

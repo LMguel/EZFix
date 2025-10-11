@@ -24,6 +24,7 @@ router.get("/:id/analise-enem", autenticar, obterAnaliseEnem);
 router.post("/", autenticar, upload.single('file'), criarRedacao);
 router.post("/reanalisar", autenticar, reanalisarTexto);
 router.post("/reanalyze", autenticar, reanalisarTexto); // Rota alternativa para compatibilidade
+router.post("/:id/analise-enem", autenticar, obterAnaliseEnem);
 router.put("/:id", autenticar, atualizarRedacao);
 router.delete("/:id", autenticar, excluirRedacao);
 
