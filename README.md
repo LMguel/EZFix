@@ -5,6 +5,7 @@ Sistema completo de correção de redações com OCR (reconhecimento de texto) e
 ## 🚀 Funcionalidades
 
 ### Backend (API)
+
 - **Autenticação**: Registro e login de usuários com JWT
 - **Redações**: Upload, OCR automático e geração de nota via IA
 - **Avaliações**: Sistema de avaliação por competências (ENEM)
@@ -12,6 +13,7 @@ Sistema completo de correção de redações com OCR (reconhecimento de texto) e
 - **Nota Automática**: Algoritmo simples de pontuação baseado no texto
 
 ### Frontend (React)
+
 - **Interface Moderna**: Dashboard baseado no design fornecido
 - **Login/Registro**: Tela de autenticação completa
 - **Upload de Redações**: Interface para enviar imagens para OCR
@@ -52,6 +54,28 @@ node scripts/seedUser.js
 npm run dev
 ```
 
+#### Configuração do LLM (Azure/OpenAI)
+
+O serviço de formatação/avaliação usa Azure OpenAI por padrão quando configurado. Em caso de bloqueio por content filter, é possível habilitar fallback para a API pública da OpenAI.
+
+Variáveis de ambiente relevantes (veja `backend/.env.example`):
+
+- Azure OpenAI
+  - `AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com`
+  - `AZURE_OPENAI_KEY=...`
+  - `AZURE_OPENAI_DEPLOYMENT=<deployment>`
+  - `AZURE_OPENAI_API_VERSION=2024-11-22`
+- OpenAI (fallback opcional)
+  - `LLM_ALLOW_OPENAI_FALLBACK=true`
+  - `OPENAI_API_KEY=...`
+
+Notas:
+
+- Alguns deployments do Azure não aceitam `temperature` customizado; por isso não enviamos este parâmetro.
+- Parâmetro de tokens: usamos `max_completion_tokens` e caímos para `max_tokens` quando necessário.
+- Em caso de erro de content filter no Azure, o serviço tenta novamente com um prompt sanitizado (system + user). Se ainda bloquear e o fallback estiver habilitado com `OPENAI_API_KEY`, cai para OpenAI.
+- Se nenhum LLM puder ser chamado, o backend devolve o texto limpo do OCR sem formatação avançada.
+
 ### 2. Frontend
 
 ```powershell
@@ -70,10 +94,12 @@ O frontend estará disponível em `http://localhost:3001` e o backend em `http:/
 ## 🔗 Endpoints da API
 
 ### Autenticação
+
 - `POST /auth/register` - Registrar usuário
 - `POST /auth/login` - Fazer login
 
 ### Redações (Requer autenticação)
+
 - `GET /redacoes` - Listar redações do usuário
 - `GET /redacoes/:id` - Obter redação específica
 - `POST /redacoes` - Criar nova redação (executa OCR)
@@ -81,6 +107,7 @@ O frontend estará disponível em `http://localhost:3001` e o backend em `http:/
 - `DELETE /redacoes/:id` - Excluir redação
 
 ### Avaliações (Requer autenticação)
+
 - `GET /avaliacoes/redacao/:redacaoId` - Listar avaliações de uma redação
 - `POST /avaliacoes` - Criar avaliação
 - `PUT /avaliacoes/:id` - Atualizar avaliação
@@ -89,6 +116,7 @@ O frontend estará disponível em `http://localhost:3001` e o backend em `http:/
 ## 📊 Como Testar
 
 ### 1. Teste Básico via Frontend
+
 1. Acesse `http://localhost:3001`
 2. Registre um novo usuário ou faça login
 3. No dashboard, clique em "OCR Scanner"
@@ -157,6 +185,7 @@ EZFix/
 ## 🔧 Tecnologias Utilizadas
 
 ### Backend
+
 - Node.js + Express
 - TypeScript
 - Prisma (ORM)
@@ -166,6 +195,7 @@ EZFix/
 - bcryptjs (hash de senhas)
 
 ### Frontend
+
 - React + TypeScript
 - Tailwind CSS
 - React Router

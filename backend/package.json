@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "ts-node src/server.ts",
-    "build": "tsc",
+    "dev": "ts-node-dev --respawn --transpile-only -P src/tsconfig.json src/server.ts",
+    "build": "tsc -p src/tsconfig.json",
     "start": "node dist/server.js"
   },
   "keywords": [],
