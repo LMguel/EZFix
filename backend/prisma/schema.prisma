@@ -9,40 +9,40 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id         String     @id @default(uuid())
-  nome       String
-  email      String     @unique
-  senhaHash  String
-  criadoEm   DateTime   @default(now())
-  redacoes   Redacao[]
+  id        String    @id @default(uuid())
+  nome      String
+  email     String    @unique
+  senhaHash String
+  criadoEm  DateTime  @default(now())
+  redacoes  Redacao[]
 }
 
 model Redacao {
-  id             String       @id @default(uuid())
-  titulo         String
-  imagemUrl      String
-  textoExtraido  String?
-  notaGerada     Float?
-  notaFinal      Float?
-  criadoEm       DateTime     @default(now())
+  id            String   @id @default(uuid())
+  titulo        String
+  imagemUrl     String
+  textoExtraido String?
+  notaGerada    Float?
+  notaFinal     Float?
+  criadoEm      DateTime @default(now())
 
-  usuario        User         @relation(fields: [usuarioId], references: [id])
-  usuarioId      String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+  usuarioId String
 
-  avaliacoes     Avaliacao[]
+  avaliacoes Avaliacao[]
 }
 
 model Avaliacao {
-  id           String     @id @default(uuid())
-  competencia  Int        // 1 a 5
-  notaComp     Float
-  comentario   String?
+  id          String  @id @default(uuid())
+  competencia Int // 1 a 5
+  notaComp    Float
+  comentario  String?
 
-  redacao      Redacao    @relation(fields: [redacaoId], references: [id])
-  redacaoId    String
+  redacao   Redacao @relation(fields: [redacaoId], references: [id])
+  redacaoId String
 }
