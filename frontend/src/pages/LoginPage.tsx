@@ -29,6 +29,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           senha: formData.senha,
         });
         authService.setToken(response.token);
+        authService.setUser(response.user);
         onLogin();
         // redirecionar para dashboard após login
         navigate('/dashboard');

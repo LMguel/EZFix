@@ -57,6 +57,15 @@ export const authService = {
   setToken: (token: string) => {
     localStorage.setItem('token', token);
   },
+
+  getUser: (): User | null => {
+    const userData = localStorage.getItem('user');
+    return userData ? JSON.parse(userData) : null;
+  },
+
+  setUser: (user: User) => {
+    localStorage.setItem('user', JSON.stringify(user));
+  },
 };
 
 // Redacao services

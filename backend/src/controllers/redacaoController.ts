@@ -371,6 +371,18 @@ export const obterAnaliseEnem = async (req: Request, res: Response) => {
 
             (analiseCombinada as any).criterios = criterios;
 
+            // Calcular e salvar notaGerada no banco
+            const notaGerada = analiseCombinada.notaGeral || analiseCombinada.pontuacao || 0;
+            if (notaGerada > 0) {
+                await prisma.redacao.update({
+                    where: { id: redacao.id },
+                    data: { 
+                        notaGerada: notaGerada,
+                        notaFinal: notaGerada // A notaFinal é igual à notaGerada quando não há avaliações humanas
+                    }
+                });
+            }
+
             // Salvar resultado completo no cache
             const resultado = {
                 textoFormatado,
