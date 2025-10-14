@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
+import RedacoesPage from './pages/RedacoesPage';
 import { authService } from './services/api';
 import './index.css';
 
@@ -56,9 +57,19 @@ const App: React.FC = () => {
             } 
           />
           <Route 
+            path="/redacoes" 
+            element={
+              isAuthenticated ? (
+                <RedacoesPage onLogout={handleLogout} />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
             path="/" 
             element={
-              <Navigate to="/login" replace />
+              <Navigate to="/dashboard" replace />
             } 
           />
         </Routes>

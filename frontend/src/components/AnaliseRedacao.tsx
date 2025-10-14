@@ -35,7 +35,6 @@ interface AnaliseTexto {
 
 const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, onClose, onProgress }) => {
   const [analise, setAnalise] = useState<AnaliseTexto | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [textoEditavel, setTextoEditavel] = useState('');
@@ -46,7 +45,6 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
 
   // polling: tenta carregar análise a cada 3s por até 30s
   const carregarAnaliseWithPolling = useCallback(async () => {
-    setLoading(true);
     setError(null);
     onProgress?.('Aguardando análise GPT', 'Solicitando avaliação ao modelo...');
     let attempts = 0;
@@ -58,7 +56,6 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
         if (response?.analise) {
           setAnalise(response.analise || response);
           onProgress?.('Análise GPT concluída', 'Resultado recebido');
-          setLoading(false);
           if (pollRef.current) {
             window.clearInterval(pollRef.current);
             pollRef.current = null;
@@ -70,7 +67,6 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
       }
       attempts++;
       if (attempts >= maxAttempts) {
-        setLoading(false);
         if (pollRef.current) {
           window.clearInterval(pollRef.current);
           pollRef.current = null;
@@ -100,7 +96,6 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
   }, [isVisible, redacaoId]);
 
   const carregarAnalise = async () => {
-    setLoading(true);
     setError(null);
     try {
       const response = await redacaoService.getAnaliseEnem(redacaoId);
@@ -114,17 +109,13 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
       if (response?.correcoes) setCorrecoes(response.correcoes || []);
     } catch (err: any) {
       setError(err.response?.data?.erro || err.response?.data?.error || err.message || 'Erro ao carregar análise');
-    } finally {
-      setLoading(false);
     }
   };
 
   const salvarTextoEditado = async () => {
-    setLoading(true);
     try {
       if (!textoEditavel || textoEditavel.trim() === '') {
         setError('Texto vazio. Insira o texto antes de salvar.');
-        setLoading(false);
         return;
       }
       // Atualiza redação (isso vai disparar re-análise no backend)
@@ -134,18 +125,14 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
       setEditing(false);
     } catch (err: any) {
       setError(err.response?.data?.erro || err.message || 'Erro ao salvar texto');
-    } finally {
-      setLoading(false);
     }
   };
 
   const reanalisarTextoEditado = async () => {
-    setLoading(true);
     setError(null);
     try {
       if (!textoEditavel || textoEditavel.trim() === '') {
         setError('Texto vazio. Insira o texto antes de reanalisar.');
-        setLoading(false);
         return;
       }
       const res = await redacaoService.reanalyze(textoEditavel);
@@ -156,8 +143,6 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
       }
     } catch (err: any) {
       setError(err.response?.data?.erro || err.message || 'Erro ao reanalisar texto');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -198,12 +183,7 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
 
         {/* Content */}
         <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
-              <span className="ml-2 text-gray-600">Analisando texto...</span>
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="text-center py-8">
               <div className="text-red-600 mb-4">❌ {error}</div>
               <button

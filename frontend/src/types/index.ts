@@ -9,9 +9,12 @@ export interface Redacao {
   id: string;
   titulo: string;
   imagemUrl: string;
+  tema?: string;
   textoExtraido?: string;
   notaGerada?: number;
   notaFinal?: number;
+  feedback?: string;
+  sugestoes?: string;
   criadoEm: string;
   usuarioId: string;
   avaliacoes: Avaliacao[];
@@ -38,6 +41,7 @@ export interface RegisterRequest {
 
 export interface AuthResponse {
   token: string;
+  user: User;
 }
 
 export interface CreateRedacaoRequest {

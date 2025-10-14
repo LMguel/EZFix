@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { redacaoService, authService } from '../services/api';
 import { Redacao } from '../types';
 import AnaliseRedacao from '../components/AnaliseRedacao';
@@ -10,10 +11,13 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+  const navigate = useNavigate();
   const [redacoes, setRedacoes] = useState<Redacao[]>([]);
   const [enemScores, setEnemScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [newRedacao, setNewRedacao] = useState({
     titulo: '',
     imagemUrl: '',
@@ -67,6 +71,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   }, []);
 
   useEffect(() => {
+    // Carregar dados do usuário do localStorage
+    const user = authService.getUser();
+    setCurrentUser(user);
+
     // Primeira chamada mostra loading
     loadRedacoes(true);
 
@@ -306,17 +314,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           </div>
           
           <nav className="hidden md:flex space-x-8">
-            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Dashboard</button>
-            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Redações</button>
-            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Turmas</button>
-            <button onClick={() => { /* navegar futuramente */ }} className="text-gray-600 hover:text-gray-800 bg-transparent">Relatórios</button>
+            <button onClick={() => navigate('/dashboard')} className="text-purple-600 font-semibold bg-transparent">Dashboard</button>
+            <button onClick={() => navigate('/redacoes')} className="text-gray-600 hover:text-gray-800 bg-transparent">Redações</button>
           </nav>
 
           <div className="flex items-center space-x-4">
             <div className="bg-purple-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold">
-              PF
+              {currentUser?.nome ? currentUser.nome.charAt(0).toUpperCase() : 'U'}
             </div>
-            <span className="text-gray-700">Prof. Fernando</span>
+            <span className="text-gray-700">
+              {currentUser?.nome || 'Usuário'}
+            </span>
             <button
               onClick={() => {
                 authService.logout();
@@ -330,69 +338,57 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 h-[calc(100vh-120px)]">
         {/* Estatísticas */}
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <div className="flex items-center space-x-2 mb-4">
+        <div className="bg-white rounded-lg shadow-lg p-4 flex flex-col justify-center">
+          <div className="flex items-center justify-center space-x-2 mb-6">
             <span className="text-xl">📊</span>
             <h2 className="text-lg font-bold text-gray-800">Estatísticas</h2>
           </div>
           
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm text-gray-600">Redações Hoje</p>
-              <p className="text-3xl font-bold text-blue-600">{redacoesHoje}</p>
+          <div className="grid grid-cols-2 gap-4 flex-1 items-center">
+            <div className="text-center p-6 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-3">Hoje</p>
+              <p className="text-4xl font-bold text-blue-600">{redacoesHoje}</p>
             </div>
             
-            <div>
-              <p className="text-sm text-gray-600">Processando</p>
-              <p className="text-3xl font-bold text-orange-600">{processando}</p>
+            <div className="text-center p-6 bg-orange-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-3">Processando</p>
+              <p className="text-4xl font-bold text-orange-600">{processando}</p>
             </div>
             
-            <div>
-              <p className="text-sm text-gray-600">Pendentes</p>
-              <p className="text-3xl font-bold text-yellow-600">{pendentes}</p>
+            <div className="text-center p-6 bg-yellow-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-3">Pendentes</p>
+              <p className="text-4xl font-bold text-yellow-600">{pendentes}</p>
             </div>
             
-            <div>
-              <p className="text-sm text-gray-600">Corrigidas</p>
-              <p className="text-3xl font-bold text-green-600">{corrigidas}</p>
+            <div className="text-center p-6 bg-green-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-3">Corrigidas</p>
+              <p className="text-4xl font-bold text-green-600">{corrigidas}</p>
             </div>
-          </div>
-
-          <div className="mt-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-lg">🛠️</span>
-              <h3 className="font-bold text-gray-800">Ferramentas</h3>
-            </div>
-            
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 mb-2"
-            >
-              📷 OCR Scanner
-            </button>
-            
-            <button className="w-full bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 mb-2">
-              📊 Relatórios IA
-            </button>
-            
-            <button className="w-full bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300">
-              👥 Gerenciar Turmas
-            </button>
           </div>
         </div>
 
         {/* Área Principal */}
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <div className="bg-green-50 border border-green-200 p-4 rounded-lg mb-6">
-            <p className="text-green-800 text-sm">
-              ✨ Texto analisado com sucesso!!
-            </p>
-          </div>
+        <div className="bg-white rounded-lg shadow-lg p-6 overflow-y-auto flex flex-col">
+          {showSuccessMessage && (
+            <div className="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
+              <div className="flex justify-between items-center">
+                <p className="text-green-800 text-sm">
+                  ✨ Texto analisado com sucesso!!
+                </p>
+                <button
+                  onClick={() => setShowSuccessMessage(false)}
+                  className="text-green-600 hover:text-green-800"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
 
-          <div className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
+          <div className="text-center flex-1 flex flex-col justify-center">
+            <div className="flex items-center justify-center space-x-2 mb-6">
               <span className="text-xl">📝</span>
               <h2 className="text-lg font-bold text-gray-800">Enviar Nova Redação</h2>
             </div>
@@ -417,7 +413,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
               />
               <div className="text-center">
                 <div className="bg-purple-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl">📄</span>
+                  <span className="text-xl">📄</span>
                 </div>
                 {selectedFile ? (
                   <div>
@@ -439,46 +435,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                   </div>
                 ) : (
                   <div>
-                    <p className="text-gray-600 mb-2">Arraste a redação escaneada aqui</p>
-                    <p className="text-gray-500 text-sm">ou clique para selecionar arquivo</p>
-                    <p className="text-gray-400 text-xs mt-2">Suporta: JPG, PNG, GIF, WebP | Máx: 5MB</p>
+                    <p className="text-gray-600 mb-2">Arraste a redação aqui</p>
+                    <p className="text-gray-500 text-sm">ou clique para selecionar</p>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Aluno:</label>
-                <select className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                  <option>Selecionar aluno...</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Padrão de Correção:</label>
-                <select className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                  <option>ENEM</option>
-                </select>
-              </div>
-            </div>
-
             <button
               onClick={() => setShowUploadModal(true)}
-              className="w-full bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 mb-4"
+              className="w-full bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 mb-6 text-sm"
             >
               🤖 Processar com IA
             </button>
 
             <div className="bg-purple-600 text-white p-4 rounded-lg">
-              <h3 className="font-bold mb-2">🚀 Análise IA em Tempo Real</h3>
-              <p className="text-sm mb-2">Sistema pronto para processar redação manuscrita</p>
-              <div className="space-y-1 text-sm">
-                <div className="flex items-center space-x-2">
+              <h3 className="font-bold mb-3 text-sm">🚀 Análise IA</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-center space-x-2">
                   <span className="text-green-300">✅</span>
                   <span>OCR Engine: Ativo</span>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-center space-x-2">
                   <span className="text-green-300">✅</span>
                   <span>Corretor IA: Standby</span>
                 </div>
@@ -488,122 +466,109 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         </div>
 
         {/* Redações Recentes */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <span className="text-xl">📄</span>
-                <h2 className="text-lg font-bold text-gray-800">Redações Recentes</h2>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500">
-                  Atualizado: {lastUpdate.toLocaleTimeString('pt-BR', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}
-                </span>
-                <button 
-                  onClick={() => loadRedacoes()}
-                  className="text-purple-600 hover:text-purple-700 text-sm flex items-center gap-1"
-                >
-                  🔄 Atualizar
-                </button>
-                <button className="text-purple-600 hover:text-purple-700 text-sm">
-                  Ver Todas
-                </button>
-              </div>
-            </div>          {loading ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500">Carregando...</p>
+        <div className="bg-white rounded-lg shadow-lg p-4 overflow-y-auto flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <span className="text-xl">📄</span>
+              <h2 className="text-lg font-bold text-gray-800">Redações Recentes</h2>
             </div>
-          ) : redacoes.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500">Nenhuma redação encontrada</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {redacoes.slice(0, 3).map((redacao) => (
-                <div key={redacao.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-medium text-gray-800">{redacao.titulo}</h3>
-                    <span className={`text-xs font-medium flex items-center gap-1 ${getStatusColor(redacao)}`}>
-                      {getStatusIcon(redacao)} {getStatusText(redacao)}
-                    </span>
-                  </div>
-                  
-                  {/* Feedback visual baseado no status */}
-                      {isOcrProcessing(redacao) && (
-                          <div className="mb-2">
-                              <div className="flex items-center gap-2 text-yellow-600">
-                                  <div className="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
-                                  <span className="text-sm">Processando OCR...</span>
-                              </div>
-                          </div>
-                      )}
+            <button 
+              onClick={() => loadRedacoes()}
+              className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1"
+            >
+              🔄
+            </button>
+          </div>
+          
+          <div className="flex-1 flex flex-col justify-center">
+            {loading ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">Carregando...</p>
+              </div>
+            ) : redacoes.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">Nenhuma redação encontrada</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {redacoes.slice(0, 3).map((redacao) => (
+                  <div key={redacao.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <h3 className="font-medium text-gray-800 text-sm">{redacao.titulo}</h3>
+                      <span className={`text-xs font-medium flex items-center gap-1 ${getStatusColor(redacao)}`}>
+                        {getStatusIcon(redacao)} {getStatusText(redacao)}
+                      </span>
+                    </div>
+                    
+                    {/* Feedback visual baseado no status */}
+                    {isOcrProcessing(redacao) && (
+                      <div className="mb-3">
+                        <div className="flex items-center gap-2 text-yellow-600">
+                          <div className="animate-spin w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
+                          <span className="text-xs">Processando...</span>
+                        </div>
+                      </div>
+                    )}
 
-                      {isOcrNoText(redacao) && (
-                          <div className="mb-2 text-orange-600 text-sm">
-                              ⚠️ OCR finalizado, nenhum texto legível foi detectado.
-                          </div>
-                      )}
-                  
-                  {/* Preview do texto extraído */}
-                  {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
-                    <div className="mb-2 p-2 bg-gray-50 rounded text-xs">
-                      <p className="text-gray-600 font-medium mb-1">Texto extraído:</p>
-                      <p className="text-gray-700 line-clamp-2">
-                        {redacao.textoExtraido.substring(0, 100)}
-                        {redacao.textoExtraido.length > 100 && '...'}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-gray-500">
-                      {new Date(redacao.criadoEm).toLocaleDateString('pt-BR')} às{' '}
-                      {new Date(redacao.criadoEm).toLocaleTimeString('pt-BR', { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                      })}
-                    </span>
-                    <div className="flex gap-2">
-                      {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
-                        <>
-                          <button 
-                            onClick={() => abrirAnalise(redacao.id.toString())}
-                            className="text-purple-600 hover:text-purple-800 text-xs font-medium bg-purple-50 px-2 py-1 rounded"
-                          >
-                            📊 Análise
-                          </button>
-                          <button 
-                            onClick={() => abrirTexto(redacao)}
-                            className="text-blue-600 hover:text-blue-800 text-xs font-medium bg-blue-50 px-2 py-1 rounded"
-                          >
-                            📄 Ver Texto
-                          </button>
-                        </>
-                      )}
-                      <button
-                        onClick={() => handleDeleteRedacao(redacao.id)}
-                        className="text-red-600 hover:text-red-800 text-xs"
-                      >
-                        Excluir
-                      </button>
+                    {isOcrNoText(redacao) && (
+                      <div className="mb-3 text-orange-600 text-xs">
+                        ⚠️ Nenhum texto detectado
+                      </div>
+                    )}
+                    
+                    {/* Preview do texto extraído */}
+                    {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
+                      <div className="mb-3 p-3 bg-gray-50 rounded text-xs">
+                        <p className="text-gray-700 line-clamp-2">
+                          {redacao.textoExtraido.substring(0, 100)}
+                          {redacao.textoExtraido.length > 100 && '...'}
+                        </p>
+                      </div>
+                    )}
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-500">
+                        {new Date(redacao.criadoEm).toLocaleDateString('pt-BR')}
+                      </span>
+                      <div className="flex gap-1">
+                        {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
+                          <>
+                            <button 
+                              onClick={() => abrirAnalise(redacao.id.toString())}
+                              className="text-purple-600 hover:text-purple-800 text-xs font-medium bg-purple-50 px-2 py-1 rounded"
+                            >
+                              📊
+                            </button>
+                            <button 
+                              onClick={() => abrirTexto(redacao)}
+                              className="text-blue-600 hover:text-blue-800 text-xs font-medium bg-blue-50 px-2 py-1 rounded"
+                            >
+                              📄
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => handleDeleteRedacao(redacao.id)}
+                          className="text-red-600 hover:text-red-800 text-xs"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="mt-6 p-4 bg-purple-50 rounded-lg">
-            <h3 className="font-bold text-purple-800 mb-2">📋 Critérios ENEM</h3>
-            <div className="space-y-1 text-sm text-purple-700">
-              <div>C1: Domínio da escrita formal</div>
-              <div>C2: Compreensão do tema</div>
-              <div>C3: Argumentação consistente</div>
-              <div>C4: Mecanismos linguísticos</div>
-              <div>C5: Proposta de intervenção</div>
+            <h3 className="font-bold text-purple-800 mb-3 text-sm text-center">📋 Critérios ENEM</h3>
+            <div className="space-y-2 text-xs text-purple-700 text-center">
+              <div>C1: Escrita formal</div>
+              <div>C2: Compreensão</div>
+              <div>C3: Argumentação</div>
+              <div>C4: Mecanismos</div>
+              <div>C5: Proposta</div>
             </div>
           </div>
         </div>
@@ -705,8 +670,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             try {
               const s = (step || '').toString().toLowerCase();
               if (s.includes('conclu') || s.includes('concluído') || s.includes('concluida')) {
-                // quando análise concluída, fechar modal de processamento
+                // quando análise concluída, fechar modal de processamento e mostrar sucesso
                 setProcessingOpen(false);
+                setShowSuccessMessage(true);
+                // Auto-hide depois de 5 segundos
+                setTimeout(() => setShowSuccessMessage(false), 5000);
               }
             } catch (e) {
               // ignore
