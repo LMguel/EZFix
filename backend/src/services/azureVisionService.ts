@@ -1,152 +1,88 @@
-import fetch from 'node-fetch';
+import axios from 'axios';
+import fs from 'fs/promises';
 
 const AZURE_ENDPOINT = (process.env.AZURE_CV_ENDPOINT || '').replace(/\/$/, '');
-const AZURE_KEY = process.env.AZURE_CV_KEY || process.env.AZURE_COMPUTER_VISION_KEY || '';
+const AZURE_KEY = process.env.AZURE_CV_KEY || '';
 
-if (!AZURE_ENDPOINT || !AZURE_KEY) {
-  // not throwing here; functions will check and return null when not configured
+// --- Interfaces para a Resposta da API v4.0 ---
+export interface AzureReadLine {
+    content: string;
+    polygon?: number[];
+    confidence: number;
+    style?: { name: 'handwritten' | 'printed'; confidence: number; };
+}
+export interface AzureReadResult {
+    text: string;
+    confidence: number;
+    lines: AzureReadLine[];
+    isHandwrittenOnly: boolean;
 }
 
-async function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function extractTextWithAzureRead(imageUrlOrBuffer: string | Buffer): Promise<{ text: string; confidence?: number; lines?: Array<{ text: string; boundingBox?: number[]; confidence?: number }>; width?: number; height?: number } | null> {
-  if (!AZURE_ENDPOINT || !AZURE_KEY) return null;
-
-  try {
-    const url = `${AZURE_ENDPOINT}/vision/v3.2/read/analyze?language=pt`;
-
-    let resp;
-    if (typeof imageUrlOrBuffer === 'string' && imageUrlOrBuffer.startsWith('http')) {
-      // send JSON with url
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Ocp-Apim-Subscription-Key': AZURE_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ url: imageUrlOrBuffer })
-      });
-    } else if (typeof imageUrlOrBuffer === 'string' && imageUrlOrBuffer.startsWith('data:')) {
-      // data URL -> buffer
-      const base64 = (imageUrlOrBuffer.split(',')[1] || '');
-      const buffer = Buffer.from(base64, 'base64');
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Ocp-Apim-Subscription-Key': AZURE_KEY,
-          'Content-Type': 'application/octet-stream'
-        },
-        body: buffer
-      });
-    } else if (Buffer.isBuffer(imageUrlOrBuffer)) {
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Ocp-Apim-Subscription-Key': AZURE_KEY,
-          'Content-Type': 'application/octet-stream'
-        },
-        body: imageUrlOrBuffer
-      });
-    } else {
-      // assume local path
-      // try to read file
-      const fs = await import('fs/promises');
-      const buffer = await fs.readFile(imageUrlOrBuffer as string);
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Ocp-Apim-Subscription-Key': AZURE_KEY,
-          'Content-Type': 'application/octet-stream'
-        },
-        body: buffer
-      });
+export async function extractTextWithAzureRead(imageUrlOrBuffer: string | Buffer): Promise<AzureReadResult | null> {
+    if (!AZURE_ENDPOINT || !AZURE_KEY) {
+        console.warn('Azure Vision (Computer Vision) não configurado.');
+        return null;
     }
+    try {
+        const url = `${AZURE_ENDPOINT}/vision/v3.2/read/analyze?language=pt`;
+        let body: any;
+        const headers: any = { 'Ocp-Apim-Subscription-Key': AZURE_KEY };
 
-    if (!resp.ok && resp.status !== 202) {
-      const text = await resp.text().catch(() => '');
-      console.warn('Azure Read API request failed:', resp.status, text.substring(0, 200));
-      return null;
-    }
-
-    // Azure returns 202 with header 'operation-location' for async result
-    const operationLocation = resp.headers.get('operation-location') || resp.headers.get('Operation-Location');
-    if (!operationLocation) {
-      console.warn('Azure Read API did not return operation-location');
-      return null;
-    }
-
-    // Poll for result
-      const maxAttempts = 30;
-      let attempt = 0;
-      let resultJson: any = null;
-
-      while (attempt < maxAttempts) {
-          await sleep(1000);
-
-          const r = await fetch(operationLocation, {
-              method: 'GET',
-              headers: { 'Ocp-Apim-Subscription-Key': AZURE_KEY },
-          });
-
-          if (!r.ok) {
-              attempt++;
-              continue;
-          }
-
-          const body = await r.json();
-          const rawStatus = (body.status ?? body.analyzeResult?.status ?? '').toString().toLowerCase();
-
-          if (rawStatus === 'succeeded') {
-              resultJson = body;
-              break;
-          }
-          if (rawStatus === 'failed') {
-              // opcional: log detalhado
-              const err = body.error || body.analyzeResult?.errors || body;
-              throw new Error(`Azure Read falhou: ${JSON.stringify(err)}`);
-          }
-
-          attempt++;
-      }
-
-      if (!resultJson) {
-          throw new Error('Azure Read timeout (status não chegou a "succeeded").');
-      }
-
-    // parse possible shapes and extract lines with bounding boxes
-    const readResults = resultJson.analyzeResult?.readResults || resultJson.readResults || resultJson.analyzeResult?.pageResults || [];
-    const allLines: Array<{ text: string; boundingBox?: number[]; confidence?: number }> = [];
-    let pageWidth = 0, pageHeight = 0;
-    if (Array.isArray(readResults)) {
-      for (const page of readResults) {
-        if (page.width) pageWidth = page.width;
-        if (page.height) pageHeight = page.height;
-        if (Array.isArray(page.lines)) {
-          for (const line of page.lines) {
-            const txt = line.text || line.words?.map((w:any)=>w.text).join(' ') || '';
-            const bbox = line.boundingBox || line.boundingBoxes || undefined;
-            let conf = undefined;
-            if (typeof line.appearance?.style?.confidence === 'number') conf = Math.round(line.appearance.style.confidence * 100);
-            else if (typeof line.confidence === 'number') conf = Math.round(line.confidence * 100);
-            else if (Array.isArray(line.words) && line.words.length > 0 && typeof line.words[0].confidence === 'number') {
-              conf = Math.round(line.words.reduce((s:any,w:any)=>s+(w.confidence||0),0)/line.words.length * 100);
-            }
-            allLines.push({ text: txt, boundingBox: bbox, confidence: conf });
-          }
+        if (typeof imageUrlOrBuffer === 'string' && imageUrlOrBuffer.startsWith('http')) {
+            // Se for uma URL, enviar como JSON
+            headers['Content-Type'] = 'application/json';
+            body = JSON.stringify({ url: imageUrlOrBuffer });
+        } else if (Buffer.isBuffer(imageUrlOrBuffer)) {
+            // Se for um Buffer, enviar como octet-stream
+            headers['Content-Type'] = 'application/octet-stream';
+            body = imageUrlOrBuffer;
+        } else {
+            throw new Error("Tipo de entrada inválido para Azure Vision. Esperava URL ou Buffer.");
         }
-      }
+
+        const initialResponse = await axios.post(url, body, { headers });
+
+        if (initialResponse.status !== 202) throw new Error(`API Azure Read (initial): Status ${initialResponse.status} - ${JSON.stringify(initialResponse.data)}`);
+
+        const operationLocation = initialResponse.headers['operation-location'];
+        if (!operationLocation) throw new Error('API Azure Read não retornou operation-location.');
+
+        let result: any = null;
+        for (let i = 0; i < 20; i++) {
+            await sleep(1000);
+            const resultResponse = await axios.get(operationLocation, { headers: { 'Ocp-Apim-Subscription-Key': AZURE_KEY } });
+            if (resultResponse.data.status === 'succeeded') {
+                result = resultResponse.data;
+                break;
+            }
+            if (resultResponse.data.status === 'failed') throw new Error(`Processamento no Azure falhou: ${JSON.stringify(resultResponse.data)}`);
+        }
+
+        if (!result || !result.analyzeResult) throw new Error('Processamento no Azure excedeu o tempo limite.');
+
+        const readResults = result.analyzeResult.readResults;
+        const allLines: AzureReadLine[] = [];
+        for (const page of readResults) {
+            for (const line of page.lines) {
+                const style = line.appearance?.style;
+                const avgConfidence = line.words.reduce((acc: number, w: any) => acc + w.confidence, 0) / (line.words.length || 1);
+                allLines.push({ content: line.text, polygon: line.boundingBox, confidence: avgConfidence, style: style ? { name: style.name, confidence: style.confidence } : undefined });
+            }
+        }
+
+        const handwrittenLines = allLines.filter(l => l.style?.name === 'handwritten');
+        const text = handwrittenLines.map(l => l.content).join('\n');
+        const confidence = handwrittenLines.length > 0 ? Math.round((handwrittenLines.reduce((s, l) => s + l.confidence, 0) / handwrittenLines.length) * 100) : 0;
+
+        return { text, confidence, lines: handwrittenLines, isHandwrittenOnly: handwrittenLines.length > 0 && handwrittenLines.length === allLines.length };
+    } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+            console.error(`Erro na API de Visão: Status ${error.response?.status} - ${JSON.stringify(error.response?.data)}`);
+        } else {
+            console.error('Erro em extractTextWithAzureRead:', error.message);
+        }
+        return null;
     }
-
-    // overall text
-    const text = allLines.map(l => l.text).join('\n');
-    const confidence = allLines.length ? Math.round(allLines.reduce((s,l)=>s+(l.confidence||80),0)/allLines.length) : 80;
-    return { text, confidence, lines: allLines, width: pageWidth, height: pageHeight };
-  } catch (error) {
-    console.warn('extractTextWithAzureRead error:', error);
-    return null;
-  }
 }
-
-export default { extractTextWithAzureRead };
