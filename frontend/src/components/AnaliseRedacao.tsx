@@ -30,7 +30,7 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
         }
     }, []);
 
-    const fetchAnalysis = useCallback(async () => {
+    const fetchAnalysis = async () => {
         try {
             const response = await redacaoService.getAnaliseEnem(redacaoId);
 
@@ -52,7 +52,7 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
             onProgress?.('Erro na Análise', err.message);
             stopPolling();
         }
-    }, [redacaoId, onProgress, stopPolling]);
+    };
 
     useEffect(() => {
         if (isVisible && redacaoId) {
@@ -79,8 +79,8 @@ const AnaliseRedacao: React.FC<AnaliseRedacaoProps> = ({ redacaoId, isVisible, o
                 clearTimeout(timeoutId);
             };
         }
-        // CORREÇÃO FINAL: Removido 'isLoading' e 'analise' da lista para quebrar o loop
-    }, [isVisible, redacaoId, fetchAnalysis]);
+        // Removida dependência de fetchAnalysis para evitar loops infinitos
+    }, [isVisible, redacaoId]);
 
     const renderCompetencia = (c: DetalheCompetencia, key: string) => (
         <div key={key} className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">

@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { Request, Response } from "express";
 import { extrairTextoDaImagem } from "../services/ocrService";
 import { analisarEnem, formatarTextoComLLM, AnaliseENEM } from "../services/ennAnalysisService";
+import { corrigirTextoOCR } from "../services/openaiService";
 
 const prisma = new PrismaClient();
 type AnaliseJob = { promise: Promise<any>; startedAt: number };
@@ -22,33 +23,65 @@ export const criarRedacao = async (req: Request, res: Response) => {
         if (!usuarioId) return res.status(401).json({ erro: "Usuário não autenticado." });
         if (!titulo || !imagemUrl) return res.status(400).json({ erro: "Título e imagem são obrigatórios." });
 
+        console.log("🔍 Iniciando extração de texto com OCR...");
         const ocrResult = await extrairTextoDaImagem(imagemUrl);
-        if (!ocrResult.isHandwritten || ocrResult.text.split(/\s+/).filter(p => p.length > 1).length < 20) {
+        
+        if (!ocrResult.text || ocrResult.text.trim().length < 50) {
             return res.status(400).json({
-                erro: "A imagem não parece conter uma redação manuscrita ou o texto é ilegível.",
+                erro: "Não foi possível extrair texto suficiente da imagem.",
                 ocrResult,
             });
         }
 
+        console.log("🤖 Iniciando correção automática com GPT...");
+        const textoCorrigido = await corrigirTextoOCR(ocrResult.text);
+
+        console.log("💾 Salvando redação no banco de dados...");
         const redacao = await prisma.redacao.create({
             data: {
                 titulo,
                 imagemUrl,
-                textoExtraido: ocrResult.text,
+                textoExtraido: textoCorrigido, // Salva o texto já corrigido
                 usuarioId
             },
         });
 
-        console.log(`[LOG-SISTEMA] Redação ${redacao.id} criada com sucesso no banco de dados.`);
+        console.log(`✅ Redação ${redacao.id} criada com sucesso!`);
 
-        return res.status(201).json({ ...redacao, ocr: ocrResult });
+        // Iniciar análise automática em background
+        console.log("⚡ Iniciando análise ENEM automática...");
+        setTimeout(async () => {
+            try {
+                const analiseEnem = await analisarEnem(textoCorrigido);
+                await prisma.redacao.update({
+                    where: { id: redacao.id },
+                    data: { 
+                        notaGerada: analiseEnem.notaFinal1000,
+                        notaFinal: analiseEnem.notaFinal1000 
+                    }
+                });
+                console.log(`📊 Análise da redação ${redacao.id} concluída: ${analiseEnem.notaFinal1000}/1000`);
+            } catch (analyzeError) {
+                console.error(`❌ Erro na análise automática da redação ${redacao.id}:`, analyzeError);
+            }
+        }, 1000);
+
+        return res.status(201).json({ 
+            ...redacao, 
+            ocr: {
+                ...ocrResult,
+                text: textoCorrigido,
+                originalText: ocrResult.text,
+                corrected: true
+            }
+        });
 
     } catch (error: any) {
-        console.error("Erro ao criar redação:", error);
+        console.error("❌ Erro ao criar redação:", error);
         if (error.message.includes('PayloadTooLargeError')) {
             return res.status(413).json({ erro: "Imagem muito grande. Limite de 10MB." });
         }
-        return res.status(500).json({ erro: "Erro interno do servidor." });
+        return res.status(500).json({ erro: "Erro interno do servidor.", detalhes: error.message });
     }
 };
 

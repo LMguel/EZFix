@@ -5,6 +5,7 @@ import { Redacao } from '../types';
 import AnaliseRedacao from '../components/AnaliseRedacao';
 import VisualizarTexto from '../components/VisualizarTexto';
 import ProcessingModal from '../components/ProcessingModal';
+import GraficoEvolucao from '../components/GraficoEvolucao';
 
 interface DashboardProps {
     onLogout: () => void;
@@ -53,7 +54,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                 await Promise.all(recent.map(async (r: Redacao) => {
                     try {
                         const resp = await redacaoService.getAnaliseEnem(r.id.toString());
-                        const nota = resp?.analise?.notaGeral ?? resp?.analise?.notaGeral ?? null;
+                        const nota = resp?.analise?.notaFinal1000 ?? null;
                         if (nota !== null && nota !== undefined) scores[r.id] = Number(nota);
                     } catch (e) {
                         // ignore per-item errors
@@ -77,6 +78,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
         // Primeira chamada mostra loading
         loadRedacoes(true);
+    }, [loadRedacoes]);
+
+    // Auto-refresh das estatísticas a cada 5 segundos
+    useEffect(() => {
+        const interval = setInterval(() => {
+            loadRedacoes(false); // Atualiza sem mostrar loading
+        }, 5000);
+
+        return () => clearInterval(interval);
     }, [loadRedacoes]);
 
     const abrirAnalise = (id: string) => {
@@ -105,43 +115,53 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         setUploadLoading(true);
 
         try {
-            // abrir modal de processamento com etapa inicial
+            // Abrir modal de processamento com etapa inicial
             setProcessingOpen(true);
-            setProcessingStep('Lendo redação.');
-            setProcessingDetails('Extraindo texto com a IA...');
-            // Quando houver arquivo selecionado, usar upload multipart (FormData)
-            let created;
+            setProcessingStep('Preparando processamento');
+            setProcessingDetails('Iniciando análise da redação...');
+            
+            // Passo 1: Upload e OCR
+            let created: Redacao;
             if (selectedFile) {
                 const fd = new FormData();
                 fd.append('titulo', newRedacao.titulo);
                 fd.append('file', selectedFile);
-                setProcessingStep('Enviando arquivo para OCR');
-                setProcessingDetails('Upload de imagem (multipart)...');
+                setProcessingStep('Extraindo texto da imagem');
+                setProcessingDetails('🔍 Aplicando OCR com Google Vision...');
                 created = await redacaoService.createWithFile(fd);
             } else {
                 let imagemUrl = newRedacao.imagemUrl;
-                // indicar que o OCR está em progresso
-                setProcessingStep('Extraindo texto (OCR)');
-                setProcessingDetails('Executando OCR otimizado (pode levar alguns segundos)');
+                setProcessingStep('Extraindo texto da imagem');
+                setProcessingDetails('🔍 Aplicando OCR com Google Vision...');
                 created = await redacaoService.create({ titulo: newRedacao.titulo, imagemUrl: imagemUrl });
             }
 
+            // Passo 2: Mostrar que a correção foi aplicada
+            setProcessingStep('Texto extraído com sucesso!');
+            setProcessingDetails('🤖 Texto corrigido automaticamente com GPT e análise ENEM iniciada...');
+            
+            // Limpar formulário
             setNewRedacao({ titulo: '', imagemUrl: '' });
             setSelectedFile(null);
             setShowUploadModal(false);
             loadRedacoes();
 
-            // Indicar que a análise GPT será iniciada
-            setProcessingStep('Analisando redação');
-            setProcessingDetails('Enviando texto extraído para o modelo para correções e avaliação ENEM...');
+            // Passo 3: Abrir modal de análise automaticamente
+            setTimeout(() => {
+                setProcessingStep('Abrindo resultados');
+                setProcessingDetails('✅ Processamento completo! Visualizando análise...');
+                
+                setTimeout(() => {
+                    setProcessingOpen(false);
+                    setRedacaoAnaliseId(created.id);
+                    setAnaliseModalOpen(true);
+                    setShowSuccessMessage(true);
+                    setTimeout(() => setShowSuccessMessage(false), 3000);
+                }, 1000);
+            }, 1500);
 
-            // Abrir modal de análise automaticamente (o componente fará a chamada ENEM)
-            setRedacaoAnaliseId(created.id);
-            setAnaliseModalOpen(true);
-            // manter modal de processamento aberto; o componente de análise chamará onClose quando finalizar
         } catch (error: any) {
             console.error('Erro ao enviar redação:', error);
-            // garantir que o modal de processamento seja fechado para evitar spinner infinito
             setProcessingOpen(false);
             if (error.response?.status === 413) {
                 alert('Imagem muito grande! Tente com uma imagem menor (máx 10MB).');
@@ -284,236 +304,260 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                 </div>
             </header>
 
-            <div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 h-[calc(100vh-120px)]">
-                {/* Estatísticas */}
-                <div className="bg-white rounded-lg shadow-lg p-4 flex flex-col justify-center">
-                    <div className="flex items-center justify-center space-x-2 mb-6">
-                        <span className="text-xl">📊</span>
-                        <h2 className="text-lg font-bold text-gray-800">Estatísticas</h2>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 flex-1 items-center">
-                        <div className="text-center p-6 bg-blue-50 rounded-lg">
-                            <p className="text-sm text-gray-600 mb-3">Hoje</p>
-                            <p className="text-4xl font-bold text-blue-600">{redacoesHoje}</p>
-                        </div>
-
-                        <div className="text-center p-6 bg-orange-50 rounded-lg">
-                            <p className="text-sm text-gray-600 mb-3">Processando</p>
-                            <p className="text-4xl font-bold text-orange-600">{processando}</p>
-                        </div>
-
-                        <div className="text-center p-6 bg-yellow-50 rounded-lg">
-                            <p className="text-sm text-gray-600 mb-3">Pendentes</p>
-                            <p className="text-4xl font-bold text-yellow-600">{pendentes}</p>
-                        </div>
-
-                        <div className="text-center p-6 bg-green-50 rounded-lg">
-                            <p className="text-sm text-gray-600 mb-3">Corrigidas</p>
-                            <p className="text-4xl font-bold text-green-600">{corrigidas}</p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Área Principal */}
-                <div className="bg-white rounded-lg shadow-lg p-6 overflow-y-auto flex flex-col">
-                    {showSuccessMessage && (
-                        <div className="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
-                            <div className="flex justify-between items-center">
-                                <p className="text-green-800 text-sm">
-                                    ✨ Texto analisado com sucesso!!
-                                </p>
-                                <button
-                                    onClick={() => setShowSuccessMessage(false)}
-                                    className="text-green-600 hover:text-green-800"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="text-center flex-1 flex flex-col justify-center">
-                        <div className="flex items-center justify-center space-x-2 mb-6">
-                            <span className="text-xl">📝</span>
-                            <h2 className="text-lg font-bold text-gray-800">Enviar Nova Redação</h2>
-                        </div>
-
-                        <div
-                            className={`border-2 border-dashed rounded-lg p-8 mb-6 transition-colors cursor-pointer ${isDragging
-                                    ? 'border-purple-500 bg-purple-50'
-                                    : 'border-gray-300 hover:border-purple-400'
-                                }`}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                            onClick={() => document.getElementById('file-input')?.click()}
-                        >
-                            <input
-                                id="file-input"
-                                type="file"
-                                accept="image/*"
-                                onChange={handleFileInputChange}
-                                className="hidden"
-                            />
-                            <div className="text-center">
-                                <div className="bg-purple-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <span className="text-xl">📄</span>
-                                </div>
-                                {selectedFile ? (
-                                    <div>
-                                        <p className="text-green-600 font-medium mb-2">✅ Arquivo selecionado:</p>
-                                        <p className="text-gray-700 text-sm">{selectedFile.name}</p>
-                                        <p className="text-gray-500 text-xs">
-                                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+            <div className="max-w-7xl mx-auto p-4 space-y-4">
+                {/* Layout em grid 2x2 */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[calc(100vh-160px)]">
+                    
+                    {/* Anexar imagem - Área grande superior esquerda */}
+                    <div className="lg:col-span-2 lg:row-span-1">
+                        <div className="bg-white rounded-lg shadow-lg p-6 overflow-y-auto flex flex-col h-full">
+                            {showSuccessMessage && (
+                                <div className="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-green-800 text-sm">
+                                            ✨ Texto analisado com sucesso!!
                                         </p>
                                         <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedFile(null);
-                                            }}
-                                            className="mt-2 text-red-600 hover:text-red-800 text-sm"
+                                            onClick={() => setShowSuccessMessage(false)}
+                                            className="text-green-600 hover:text-green-800"
                                         >
-                                            Remover arquivo
+                                            ✕
                                         </button>
                                     </div>
+                                </div>
+                            )}
+
+                            <div className="text-center flex-1 flex flex-col justify-center">
+                                <div className="flex items-center justify-center space-x-2 mb-6">
+                                    <span className="text-2xl">📝</span>
+                                    <h2 className="text-2xl font-bold text-gray-800">Anexar Imagem</h2>
+                                </div>
+
+                                <div
+                                    className={`border-2 border-dashed rounded-lg p-12 mb-6 transition-colors cursor-pointer ${isDragging
+                                            ? 'border-purple-500 bg-purple-50'
+                                            : 'border-gray-300 hover:border-purple-400'
+                                        }`}
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                    onClick={() => document.getElementById('file-input')?.click()}
+                                >
+                                    <input
+                                        id="file-input"
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleFileInputChange}
+                                        className="hidden"
+                                    />
+                                    <div className="text-center">
+                                        <div className="bg-purple-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <span className="text-3xl">📄</span>
+                                        </div>
+                                        {selectedFile ? (
+                                            <div>
+                                                <p className="text-green-600 font-medium mb-3 text-lg">✅ Arquivo selecionado:</p>
+                                                <p className="text-gray-700 text-base font-medium">{selectedFile.name}</p>
+                                                <p className="text-gray-500 text-sm">
+                                                    {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedFile(null);
+                                                    }}
+                                                    className="mt-3 text-red-600 hover:text-red-800 text-sm"
+                                                >
+                                                    Remover arquivo
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p className="text-gray-600 mb-3 text-lg">Arraste a redação aqui</p>
+                                                <p className="text-gray-500 text-base">ou clique para selecionar</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => setShowUploadModal(true)}
+                                    className="w-full bg-purple-600 text-white py-4 px-8 rounded-lg hover:bg-purple-700 mb-8 text-lg font-semibold"
+                                >
+                                    🤖 Processar com IA
+                                </button>
+
+                                <div className="bg-purple-600 text-white p-6 rounded-lg">
+                                    <h3 className="font-bold mb-4 text-lg">🚀 Análise IA</h3>
+                                    <div className="space-y-3 text-sm">
+                                        <div className="flex items-center justify-center space-x-2">
+                                            <span className="text-green-300">✅</span>
+                                            <span>OCR Engine: Ativo</span>
+                                        </div>
+                                        <div className="flex items-center justify-center space-x-2">
+                                            <span className="text-green-300">✅</span>
+                                            <span>Corretor IA: Standby</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Redações recentes - Superior direita */}
+                    <div className="lg:col-span-1 lg:row-span-2">
+                        <div className="bg-white rounded-lg shadow-lg p-4 overflow-y-auto flex flex-col h-full">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center space-x-2">
+                                    <span className="text-xl">📄</span>
+                                    <h2 className="text-lg font-bold text-gray-800">Redações Recentes</h2>
+                                </div>
+                                <button
+                                    onClick={() => loadRedacoes()}
+                                    className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1"
+                                >
+                                    🔄
+                                </button>
+                            </div>
+
+                            <div className="flex-1 flex flex-col justify-start">
+                                {loading ? (
+                                    <div className="text-center py-8">
+                                        <p className="text-gray-500 text-sm">Carregando...</p>
+                                    </div>
+                                ) : redacoes.length === 0 ? (
+                                    <div className="text-center py-8">
+                                        <p className="text-gray-500 text-sm">Nenhuma redação encontrada</p>
+                                    </div>
                                 ) : (
-                                    <div>
-                                        <p className="text-gray-600 mb-2">Arraste a redação aqui</p>
-                                        <p className="text-gray-500 text-sm">ou clique para selecionar</p>
+                                    <div className="space-y-4">
+                                        {redacoes.slice(0, 5).map((redacao) => (
+                                            <div key={redacao.id} className="border border-gray-200 rounded-lg p-4">
+                                                <div className="flex justify-between items-start mb-3">
+                                                    <div className="flex-1">
+                                                        <h3 className="font-medium text-gray-800 text-sm">{redacao.titulo}</h3>
+                                                        {/* Mostrar nota ENEM se disponível */}
+                                                        {enemScores[redacao.id] && (
+                                                            <div className="mt-1">
+                                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                                    🏆 Nota ENEM: {enemScores[redacao.id]}/1000
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <span className={`text-xs font-medium flex items-center gap-1 ${getStatusColor(redacao)}`}>
+                                                        {getStatusIcon(redacao)} {getStatusText(redacao)}
+                                                    </span>
+                                                </div>
+
+                                                {isOcrProcessing(redacao) && (
+                                                    <div className="mb-3">
+                                                        <div className="flex items-center gap-2 text-yellow-600">
+                                                            <div className="animate-spin w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
+                                                            <span className="text-xs">Processando...</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isOcrNoText(redacao) && (
+                                                    <div className="mb-3 text-orange-600 text-xs">
+                                                        ⚠️ Nenhum texto detectado
+                                                    </div>
+                                                )}
+
+                                                {/* Preview do texto extraído */}
+                                                {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
+                                                    <div className="mb-3 p-3 bg-gray-50 rounded text-xs">
+                                                        <p className="text-gray-700 line-clamp-2">
+                                                            {redacao.textoExtraido}
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-gray-500">
+                                                        {new Date(redacao.criadoEm).toLocaleDateString('pt-BR')}
+                                                    </span>
+                                                    <div className="flex gap-1">
+                                                        {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => abrirAnalise(redacao.id.toString())}
+                                                                    className="text-purple-600 hover:text-purple-800 text-xs font-medium bg-purple-50 px-2 py-1 rounded"
+                                                                >
+                                                                    📊
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => abrirTexto(redacao)}
+                                                                    className="text-blue-600 hover:text-blue-800 text-xs font-medium bg-blue-50 px-2 py-1 rounded"
+                                                                >
+                                                                    📄
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleDeleteRedacao(redacao.id)}
+                                                            className="text-red-600 hover:text-red-800 text-xs"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </div>
-                        </div>
 
-                        <button
-                            onClick={() => setShowUploadModal(true)}
-                            className="w-full bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 mb-6 text-sm"
-                        >
-                            🤖 Processar com IA
-                        </button>
-
-                        <div className="bg-purple-600 text-white p-4 rounded-lg">
-                            <h3 className="font-bold mb-3 text-sm">🚀 Análise IA</h3>
-                            <div className="space-y-2 text-xs">
-                                <div className="flex items-center justify-center space-x-2">
-                                    <span className="text-green-300">✅</span>
-                                    <span>OCR Engine: Ativo</span>
-                                </div>
-                                <div className="flex items-center justify-center space-x-2">
-                                    <span className="text-green-300">✅</span>
-                                    <span>Corretor IA: Standby</span>
+                            <div className="mt-6 p-4 bg-purple-50 rounded-lg">
+                                <h3 className="font-bold text-purple-800 mb-3 text-sm text-center">📋 Critérios ENEM</h3>
+                                <div className="space-y-2 text-xs text-purple-700 text-center">
+                                    <div>C1: Escrita formal</div>
+                                    <div>C2: Compreensão</div>
+                                    <div>C3: Argumentação</div>
+                                    <div>C4: Mecanismos</div>
+                                    <div>C5: Proposta</div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Redações Recentes */}
-                <div className="bg-white rounded-lg shadow-lg p-4 overflow-y-auto flex flex-col">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center space-x-2">
-                            <span className="text-xl">📄</span>
-                            <h2 className="text-lg font-bold text-gray-800">Redações Recentes</h2>
+                    {/* Estatísticas - Inferior esquerda */}
+                    <div className="lg:col-span-1 lg:row-span-1">
+                        <div className="bg-white rounded-lg shadow-lg p-4 flex flex-col justify-center h-full">
+                            <div className="flex items-center justify-center space-x-2 mb-6">
+                                <span className="text-xl">📊</span>
+                                <h2 className="text-lg font-bold text-gray-800">Estatísticas</h2>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 flex-1 items-center">
+                                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                                    <p className="text-xs text-gray-600 mb-2">Hoje</p>
+                                    <p className="text-2xl font-bold text-blue-600">{redacoesHoje}</p>
+                                </div>
+
+                                <div className="text-center p-4 bg-orange-50 rounded-lg">
+                                    <p className="text-xs text-gray-600 mb-2">Processando</p>
+                                    <p className="text-2xl font-bold text-orange-600">{processando}</p>
+                                </div>
+
+                                <div className="text-center p-4 bg-yellow-50 rounded-lg">
+                                    <p className="text-xs text-gray-600 mb-2">Pendentes</p>
+                                    <p className="text-2xl font-bold text-yellow-600">{pendentes}</p>
+                                </div>
+
+                                <div className="text-center p-4 bg-green-50 rounded-lg">
+                                    <p className="text-xs text-gray-600 mb-2">Corrigidas</p>
+                                    <p className="text-2xl font-bold text-green-600">{corrigidas}</p>
+                                </div>
+                            </div>
                         </div>
-                        <button
-                            onClick={() => loadRedacoes()}
-                            className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1"
-                        >
-                            🔄
-                        </button>
                     </div>
 
-                    <div className="flex-1 flex flex-col justify-center">
-                        {loading ? (
-                            <div className="text-center py-8">
-                                <p className="text-gray-500 text-sm">Carregando...</p>
-                            </div>
-                        ) : redacoes.length === 0 ? (
-                            <div className="text-center py-8">
-                                <p className="text-gray-500 text-sm">Nenhuma redação encontrada</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                {redacoes.slice(0, 3).map((redacao) => (
-                                    <div key={redacao.id} className="border border-gray-200 rounded-lg p-4">
-                                        <div className="flex justify-between items-start mb-3">
-                                            <h3 className="font-medium text-gray-800 text-sm">{redacao.titulo}</h3>
-                                            <span className={`text-xs font-medium flex items-center gap-1 ${getStatusColor(redacao)}`}>
-                                                {getStatusIcon(redacao)} {getStatusText(redacao)}
-                                            </span>
-                                        </div>
-
-                                        {isOcrProcessing(redacao) && (
-                                            <div className="mb-3">
-                                                <div className="flex items-center gap-2 text-yellow-600">
-                                                    <div className="animate-spin w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
-                                                    <span className="text-xs">Processando...</span>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {isOcrNoText(redacao) && (
-                                            <div className="mb-3 text-orange-600 text-xs">
-                                                ⚠️ Nenhum texto detectado
-                                            </div>
-                                        )}
-
-                                        {/* Preview do texto extraído */}
-                                        {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
-                                            <div className="mb-3 p-3 bg-gray-50 rounded text-xs">
-                                                {/* ✨ OTIMIZAÇÃO APLICADA AQUI ✨ */}
-                                                <p className="text-gray-700 line-clamp-2">
-                                                    {redacao.textoExtraido}
-                                                </p>
-                                            </div>
-                                        )}
-
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-gray-500">
-                                                {new Date(redacao.criadoEm).toLocaleDateString('pt-BR')}
-                                            </span>
-                                            <div className="flex gap-1">
-                                                {redacao.textoExtraido && redacao.textoExtraido.trim() !== '' && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => abrirAnalise(redacao.id.toString())}
-                                                            className="text-purple-600 hover:text-purple-800 text-xs font-medium bg-purple-50 px-2 py-1 rounded"
-                                                        >
-                                                            📊
-                                                        </button>
-                                                        <button
-                                                            onClick={() => abrirTexto(redacao)}
-                                                            className="text-blue-600 hover:text-blue-800 text-xs font-medium bg-blue-50 px-2 py-1 rounded"
-                                                        >
-                                                            📄
-                                                        </button>
-                                                    </>
-                                                )}
-                                                <button
-                                                    onClick={() => handleDeleteRedacao(redacao.id)}
-                                                    className="text-red-600 hover:text-red-800 text-xs"
-                                                >
-                                                    🗑️
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mt-6 p-4 bg-purple-50 rounded-lg">
-                        <h3 className="font-bold text-purple-800 mb-3 text-sm text-center">📋 Critérios ENEM</h3>
-                        <div className="space-y-2 text-xs text-purple-700 text-center">
-                            <div>C1: Escrita formal</div>
-                            <div>C2: Compreensão</div>
-                            <div>C3: Argumentação</div>
-                            <div>C4: Mecanismos</div>
-                            <div>C5: Proposta</div>
-                        </div>
+                    {/* Gráficos de melhora - Inferior direita */}
+                    <div className="lg:col-span-1 lg:row-span-1">
+                        <GraficoEvolucao redacoes={redacoes} />
                     </div>
                 </div>
             </div>
@@ -633,6 +677,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                 onClose={fecharTexto}
                 redacao={redacaoTextoSelecionada}
             />
+
         </div>
     );
 };

@@ -36,3 +36,40 @@ export async function chamarLLM(prompt: string, maxTokens = 2048, temperature = 
         throw new Error(`Falha na comunicação com o serviço de IA: ${error.message}`);
     }
 }
+
+// Nova função para correção automática de texto OCR
+export async function corrigirTextoOCR(textoOCR: string): Promise<string> {
+    try {
+        const promptCorrecao = `Você é um especialista em correção de textos extraídos por OCR de redações manuscritas. 
+
+Sua tarefa é:
+1. Corrigir erros de OCR (palavras mal interpretadas, caracteres trocados)
+2. Corrigir erros ortográficos e gramaticais
+3. Organizar o texto em parágrafos bem estruturados
+4. Manter o sentido e o estilo original do autor
+5. Garantir que todas as palavras sejam legíveis e corretas
+
+IMPORTANTE: 
+- NÃO altere o conteúdo ou significado do texto
+- NÃO adicione informações que não estavam no original
+- NÃO corrija opiniões ou argumentos do autor
+- APENAS corrija erros técnicos de OCR e ortografia
+- Mantenha a estrutura argumentativa original
+
+Texto extraído por OCR:
+"""
+${textoOCR}
+"""
+
+Retorne APENAS o texto corrigido, sem comentários ou explicações:`;
+
+        const textoCorrigido = await chamarLLM(promptCorrecao, 2048, 0.2);
+        console.log("✅ Texto corrigido com sucesso pelo GPT");
+        return textoCorrigido;
+
+    } catch (error: any) {
+        console.error("❌ Erro na correção automática:", error.message);
+        // Se falhar, retorna o texto original
+        return textoOCR;
+    }
+}
