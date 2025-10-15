@@ -1,8 +1,6 @@
 import sharp from 'sharp';
-import { extractTextWithAzureRead, AzureReadLine, AzureReadResult } from './azureVisionService';
+import googleVisionService from './googleVisionService';
 import fetch from 'node-fetch';
-// O Tesseract ainda é necessário para o fallback final
-import Tesseract from "tesseract.js";
 
 const posProcessarTextoManuscrito = (texto: string): string => {
     let textoCorrigido = texto;
@@ -83,12 +81,48 @@ const corrigirPalavrasFragmentadas = (texto: string): string => {
     return textoCorrigido;
 };
 
+const ocrCache = new Map<string, Promise<OCRResult>>();
+
+// Interface para o resultado do OCR
 export type OCRResult = {
     text: string;
-    lines?: AzureReadLine[];
     confidence: number;
-    engine: 'azure' | 'tesseract';
+    engine: 'google-vision';
     isHandwritten: boolean;
+};
+
+// Nova função de pós-processamento para filtrar texto e números de linha
+const filtrarTextoOCR = (text: string, isHandwritten: boolean): string => {
+    if (!isHandwritten) return text; // Se não for manuscrito, não filtra números de linha
+
+    const linhas = text.split('\n');
+    const linhasFiltradas: string[] = [];
+
+    linhas.forEach(linha => {
+        const trimmedLinha = linha.trim();
+        // Remove números de linha no início da linha (até 3 dígitos)
+        // e espaços/pontos/parenteses que os acompanham.
+        const linhaSemNumero = trimmedLinha.replace(/^(\d{1,3}[\s.]*[\)\.]?\s*)/, '');
+
+        // Heurística para tentar detectar se a linha é só um número isolado ou marcador
+        // Ex: "1", "2.", "3)", "(4)"
+        if (linhaSemNumero.length === 0 && trimmedLinha.match(/^\s*\d{1,3}[\s.]*[\)\.]?\s*$/)) {
+            // Se a linha original era SÓ um número, ignoramos
+            return;
+        }
+
+        // Outros filtros para caracteres indesejados comuns em OCR de manuscritos
+        const textoLimpo = linhaSemNumero
+            .replace(/[•●▪]/g, '') // Remove bullet points comuns
+            .replace(/\s{2,}/g, ' ') // Substitui múltiplos espaços por um único
+            .trim();
+
+        if (textoLimpo.length > 0) {
+            linhasFiltradas.push(textoLimpo);
+        }
+    });
+
+    return linhasFiltradas.join('\n');
 };
 
 async function carregarBufferDeImagem(imageUrl: string): Promise<Buffer> {
@@ -104,84 +138,54 @@ async function carregarBufferDeImagem(imageUrl: string): Promise<Buffer> {
         return fs.readFile(imageUrl);
     }
 }
-const ocrCache = new Map<string, Promise<OCRResult>>();
-
 
 export const extrairTextoDaImagem = async (imageUrl: string): Promise<OCRResult> => {
-    const cacheKey = imageUrl.slice(0, 300);
+    const cacheKey = imageUrl.slice(0, 300); // Usar parte da URL como chave de cache
     if (ocrCache.has(cacheKey)) {
         return ocrCache.get(cacheKey)!;
     }
 
     const ocrPromise: Promise<OCRResult> = (async () => {
-        let originalBuffer: Buffer | null = null;
         try {
-            // 1. Carregar a imagem original (necessário para o Tesseract ou para enviar como buffer)
-            originalBuffer = await carregarBufferDeImagem(imageUrl);
+            const originalBuffer = await carregarBufferDeImagem(imageUrl);
 
-            // TENTATIVA 1: Azure com a URL da imagem (se for uma URL)
-            if (/^https?:\/\//.test(imageUrl)) {
-                console.log("Tentando Azure com a URL da imagem original...");
-                const azureResultUrl = await extractTextWithAzureRead(imageUrl); // Enviando a URL diretamente
-                if (azureResultUrl && azureResultUrl.text.trim().split(/\s+/).length > 20) {
-                    console.log(`SUCESSO COM AZURE (URL)! Encontrou ${azureResultUrl.text.trim().split(/\s+/).length} palavras.`);
-                    return {
-                        text: posProcessarTextoManuscrito(azureResultUrl.text),
-                        lines: azureResultUrl.lines,
-                        confidence: azureResultUrl.confidence,
-                        engine: 'azure',
-                        isHandwritten: true
-                    };
-                }
-                const wordsFoundUrl = azureResultUrl ? azureResultUrl.text.trim().split(/\s+/).filter(p => p).length : 0;
-                console.warn(`Azure (URL) não encontrou texto suficiente (encontrado: ${wordsFoundUrl} palavras).`);
-            }
-
-            // TENTATIVA 2: Azure com o BUFFER da imagem original (nosso método anterior)
-            console.log("Tentando Azure com o BUFFER da imagem original...");
-            const azureResultBuffer = await extractTextWithAzureRead(originalBuffer);
-
-            if (azureResultBuffer && azureResultBuffer.text.trim().split(/\s+/).length > 20) {
-                console.log(`SUCESSO COM AZURE (BUFFER)! Encontrou ${azureResultBuffer.text.trim().split(/\s+/).length} palavras.`);
-                return {
-                    text: posProcessarTextoManuscrito(azureResultBuffer.text),
-                    lines: azureResultBuffer.lines,
-                    confidence: azureResultBuffer.confidence,
-                    engine: 'azure',
-                    isHandwritten: true
-                };
-            }
-            const wordsFoundBuffer = azureResultBuffer ? azureResultBuffer.text.trim().split(/\s+/).filter(p => p).length : 0;
-            console.warn(`Azure (BUFFER) não encontrou texto suficiente (encontrado: ${wordsFoundBuffer} palavras). Ativando fallback com Tesseract...`);
-
-            // FALLBACK COM TESSERACT (Otimização para Tesseract)
-            console.log("Otimizando imagem para o fallback com Tesseract...");
-            const processedBufferForTesseract = await sharp(originalBuffer)
-                .grayscale()
-                .normalize()
-                .sharpen()
+            console.log("Aplicando pré-processamento avançado...");
+            // Pré-processamento mais agressivo para manuscritos
+            const processedBuffer = await sharp(originalBuffer)
+                .grayscale() // Converte para tons de cinza
+                .normalize() // Normaliza o contraste
+                .removeAlpha() // Remove canal alfa se houver (útil para fundos transparentes)
+                .sharpen() // Aumenta a nitidez
                 .toBuffer();
+            console.log("Imagem otimizada.");
 
-            const { data } = await Tesseract.recognize(processedBufferForTesseract, 'por');
+            const googleResult = await googleVisionService.extractTextWithGoogleVision(processedBuffer);
 
-            if (!data.text || data.confidence < 40) {
-                return { text: 'Não foi possível extrair texto legível da imagem.', confidence: data.confidence || 0, engine: 'tesseract', isHandwritten: false };
+            if (!googleResult || !googleResult.text) {
+                return { text: 'Google Vision não conseguiu extrair texto.', confidence: 0, engine: 'google-vision', isHandwritten: true };
             }
 
-            console.log(`Tesseract (fallback) encontrou ${data.text.trim().split(/\s+/).length} palavras.`);
+            // Aplica o novo filtro de texto após a extração
+            const filteredText = filtrarTextoOCR(googleResult.text, true); // Assumindo que essa rota é para manuscrito
+
+            // Heurística simples para verificar se realmente parece manuscrito
+            const wordCount = filteredText.split(/\s+/).filter(p => p.length > 1).length;
+            const isActuallyHandwritten = wordCount > 20; // Mais de 20 palavras filtradas, considera manuscrito
+
             return {
-                text: posProcessarTextoManuscrito(data.text),
-                confidence: data.confidence,
-                engine: 'tesseract',
-                isHandwritten: true
+                text: filteredText,
+                confidence: googleResult.confidence,
+                engine: 'google-vision',
+                isHandwritten: isActuallyHandwritten
             };
 
         } catch (error: any) {
             console.error('Erro crítico no serviço de OCR:', error);
-            return { text: `Erro ao processar imagem: ${error.message}`, confidence: 0, engine: 'tesseract', isHandwritten: false };
+            // Retorna um resultado de erro, mas mantém a estrutura de OCRResult
+            return { text: `Erro ao processar imagem para OCR: ${error.message}`, confidence: 0, engine: 'google-vision', isHandwritten: false };
         }
     })();
 
-    ocrCache.set(cacheKey, ocrPromise);
+    ocrCache.set(cacheKey, ocrPromise); // Cacheia a promessa
     return ocrPromise;
 };

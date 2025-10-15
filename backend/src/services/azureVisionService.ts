@@ -1,10 +1,8 @@
 import axios from 'axios';
-import fs from 'fs/promises';
 
 const AZURE_ENDPOINT = (process.env.AZURE_CV_ENDPOINT || '').replace(/\/$/, '');
 const AZURE_KEY = process.env.AZURE_CV_KEY || '';
 
-// --- Interfaces para a Resposta da API v4.0 ---
 export interface AzureReadLine {
     content: string;
     polygon?: number[];
@@ -18,70 +16,64 @@ export interface AzureReadResult {
     isHandwrittenOnly: boolean;
 }
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-export async function extractTextWithAzureRead(imageUrlOrBuffer: string | Buffer): Promise<AzureReadResult | null> {
+export async function extractTextWithAzureRead(imageBuffer: Buffer): Promise<AzureReadResult | null> {
     if (!AZURE_ENDPOINT || !AZURE_KEY) {
-        console.warn('Azure Vision (Computer Vision) não configurado.');
+        console.warn('Azure Vision v4.0 (Serviços de IA) não configurado.');
         return null;
     }
+
     try {
-        const url = `${AZURE_ENDPOINT}/vision/v3.2/read/analyze?language=pt`;
-        let body: any;
-        const headers: any = { 'Ocp-Apim-Subscription-Key': AZURE_KEY };
+        const url = `${AZURE_ENDPOINT}/computervision/imageanalysis:analyze?api-version=2024-05-01&features=read&model-version=latest&language=pt`;
 
-        if (typeof imageUrlOrBuffer === 'string' && imageUrlOrBuffer.startsWith('http')) {
-            // Se for uma URL, enviar como JSON
-            headers['Content-Type'] = 'application/json';
-            body = JSON.stringify({ url: imageUrlOrBuffer });
-        } else if (Buffer.isBuffer(imageUrlOrBuffer)) {
-            // Se for um Buffer, enviar como octet-stream
-            headers['Content-Type'] = 'application/octet-stream';
-            body = imageUrlOrBuffer;
-        } else {
-            throw new Error("Tipo de entrada inválido para Azure Vision. Esperava URL ou Buffer.");
+        console.log("\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+        console.log(" TENTANDO CHAMAR A API DE VISÃO v4.0");
+        console.log("Verifique se o Endpoint abaixo é o do seu NOVO recurso:");
+        console.log("--> Endpoint em uso:", AZURE_ENDPOINT);
+        console.log("--> URL Final Gerada:", url);
+        console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+
+        const headers = {
+            'Content-Type': 'application/octet-stream',
+            'Ocp-Apim-Subscription-Key': AZURE_KEY
+        };
+
+        const response = await axios.post(url, imageBuffer, { headers });
+
+        const readResult = response.data?.readResult;
+        if (!readResult || !readResult.blocks || readResult.blocks.length === 0) {
+            return { text: '', confidence: 0, lines: [], isHandwrittenOnly: false };
         }
 
-        const initialResponse = await axios.post(url, body, { headers });
-
-        if (initialResponse.status !== 202) throw new Error(`API Azure Read (initial): Status ${initialResponse.status} - ${JSON.stringify(initialResponse.data)}`);
-
-        const operationLocation = initialResponse.headers['operation-location'];
-        if (!operationLocation) throw new Error('API Azure Read não retornou operation-location.');
-
-        let result: any = null;
-        for (let i = 0; i < 20; i++) {
-            await sleep(1000);
-            const resultResponse = await axios.get(operationLocation, { headers: { 'Ocp-Apim-Subscription-Key': AZURE_KEY } });
-            if (resultResponse.data.status === 'succeeded') {
-                result = resultResponse.data;
-                break;
-            }
-            if (resultResponse.data.status === 'failed') throw new Error(`Processamento no Azure falhou: ${JSON.stringify(resultResponse.data)}`);
-        }
-
-        if (!result || !result.analyzeResult) throw new Error('Processamento no Azure excedeu o tempo limite.');
-
-        const readResults = result.analyzeResult.readResults;
         const allLines: AzureReadLine[] = [];
-        for (const page of readResults) {
-            for (const line of page.lines) {
-                const style = line.appearance?.style;
-                const avgConfidence = line.words.reduce((acc: number, w: any) => acc + w.confidence, 0) / (line.words.length || 1);
-                allLines.push({ content: line.text, polygon: line.boundingBox, confidence: avgConfidence, style: style ? { name: style.name, confidence: style.confidence } : undefined });
+        for (const block of readResult.blocks) {
+            for (const line of block.lines) {
+                const firstWordStyle = line.words[0]?.style;
+                const lineConfidence = line.words.reduce((acc: number, w: any) => acc + w.confidence, 0) / (line.words.length || 1);
+                allLines.push({
+                    content: line.text,
+                    polygon: line.boundingPolygon?.map((p: any) => [p.x, p.y]).flat(),
+                    confidence: lineConfidence,
+                    style: firstWordStyle
+                });
             }
         }
 
         const handwrittenLines = allLines.filter(l => l.style?.name === 'handwritten');
         const text = handwrittenLines.map(l => l.content).join('\n');
-        const confidence = handwrittenLines.length > 0 ? Math.round((handwrittenLines.reduce((s, l) => s + l.confidence, 0) / handwrittenLines.length) * 100) : 0;
+        const confidence = handwrittenLines.length > 0
+            ? Math.round((handwrittenLines.reduce((sum, line) => sum + line.confidence, 0) / handwrittenLines.length) * 100)
+            : 0;
 
+        console.log("SUCESSO! Azure Read v4.0 processou a imagem pré-processada.");
         return { text, confidence, lines: handwrittenLines, isHandwrittenOnly: handwrittenLines.length > 0 && handwrittenLines.length === allLines.length };
+
     } catch (error: any) {
         if (axios.isAxiosError(error)) {
-            console.error(`Erro na API de Visão: Status ${error.response?.status} - ${JSON.stringify(error.response?.data)}`);
+            const status = error.response?.status;
+            const data = error.response?.data;
+            console.error(`Erro na comunicação com a API de Visão v4.0: Status ${status} - ${JSON.stringify(data)}`);
         } else {
-            console.error('Erro em extractTextWithAzureRead:', error.message);
+            console.error('Erro detalhado em extractTextWithAzureRead (v4.0):', error.message);
         }
         return null;
     }
