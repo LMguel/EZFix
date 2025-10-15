@@ -11,9 +11,17 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Verificar se há token salvo
+    // Verificar se há token salvo e se ainda é válido
     const token = authService.getToken();
-    setIsAuthenticated(!!token);
+    if (token) {
+      // Verificar se o token ainda é válido fazendo uma requisição simples
+      // Se for inválido, o interceptor vai limpar automaticamente
+      setIsAuthenticated(true);
+    } else {
+      // Garantir que não há dados residuais
+      authService.logout();
+      setIsAuthenticated(false);
+    }
     setLoading(false);
   }, []);
 
@@ -22,6 +30,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    authService.logout(); // Limpar token e dados do usuário
     setIsAuthenticated(false);
   };
 
@@ -69,7 +78,11 @@ const App: React.FC = () => {
           <Route 
             path="/" 
             element={
-              <Navigate to="/dashboard" replace />
+              isAuthenticated ? (
+                <Navigate to="/dashboard" replace />
+              ) : (
+                <Navigate to="/login" replace />
+              )
             } 
           />
         </Routes>

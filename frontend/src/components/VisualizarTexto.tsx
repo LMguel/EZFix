@@ -14,9 +14,6 @@ const VisualizarTexto: React.FC<VisualizarTextoProps> = ({ isVisible, onClose, r
     const palavrasDetectadas = textoLimpo.split(/\s+/).filter(p => p.trim().length > 0).length;
     const linhasDetectadas = textoLimpo.split('\n').filter(l => l.trim().length > 0).length;
 
-    // MUDANÇA: Usando a nota final da análise ENEM e convertendo para escala 0-10
-    const notaFinalExibicao = redacao.notaFinal ? (redacao.notaFinal / 100).toFixed(1) : 'N/A';
-
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
@@ -31,18 +28,14 @@ const VisualizarTexto: React.FC<VisualizarTextoProps> = ({ isVisible, onClose, r
 
                 {/* Stats */}
                 <div className="bg-gray-50 p-4 border-b">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                         <div className="text-center">
                             <div className="text-2xl font-bold text-blue-600">{palavrasDetectadas}</div>
                             <div className="text-sm text-gray-600">Palavras</div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-bold text-green-600">{linhasDetectadas}</div>
-                            <div className="text-sm text-gray-600">Linhas</div>
-                        </div>
-                        <div className="text-center">
-                            <div className="text-2xl font-bold text-purple-600">{notaFinalExibicao}</div>
-                            <div className="text-sm text-gray-600">Nota Final (0-10)</div>
+                            <div className="text-sm text-gray-600">Parágrafos</div>
                         </div>
                         <div className="text-center">
                             <div className="text-2xl font-bold text-orange-600">{textoLimpo.length}</div>
