@@ -10,7 +10,7 @@ import {
   CreateAvaliacaoRequest 
 } from '../types';
 
-const API_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = 'https://ezfix.onrender.com';
 
 // Configuração do axios
 const api = axios.create({
